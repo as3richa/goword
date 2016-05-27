@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euxo pipefail
+
+mkdir -p static/
+
+jshint client/*.js
+
+for FILE in $(ls ./client/*.html | xargs -n1 basename); do
+  html-minifier \
+    --html-5 \
+    --remove-comments \
+    --collapse-whitespace \
+    --remove-attribute-quotes \
+    client/$FILE > static/$FILE
+done
+minify --output static/script.js client/main.js > /dev/null
+minify --output static/style.css client/style.css > /dev/null
+cp client/*.ico client/*.svg static

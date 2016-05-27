@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"net/http"
@@ -10,7 +10,22 @@ import (
 
 func router() http.Handler {
 	router := httprouter.New()
-	router.GET("/", index)
+
+	router.GET("/internal/grid/", gridHandler)
+	router.GET("/internal/grid/:seed", gridHandler)
+	for route := range staticRoutes {
+		router.GET(route, staticHandler)
+	}
+
+	router.RedirectTrailingSlash = true
+	router.RedirectFixedPath = true
+	router.HandleMethodNotAllowed = true
+	router.NotFound = errorHandler(404)
+	router.MethodNotAllowed = errorHandler(405)
+	router.PanicHandler = func(w http.ResponseWriter, r *http.Request, _ interface{}) {
+		errorHandler(500)(w, r)
+	}
+
 	return loggingHandler(router)
 }
 

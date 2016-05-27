@@ -1,40 +1,26 @@
 package main
 
 import (
-  "flag"
-  "net/http"
-  "time"
-  "os"
-  "os/signal"
-  stdlog "log"
-  "syscall"
+	"flag"
+	"os"
+	"os/signal"
+	"syscall"
 
-  "internal/log"
+	"internal/log"
+	"internal/server"
 )
 
 var addressFlag = flag.String("address", ":8080", "address to listen on")
 
 func main() {
-	wait := make(chan struct{})
-  go signalHandler(func() { close(wait) })
-	go func() { server(); close(wait) }()
-	<-wait
-}
+	flag.Parse()
 
-func server() {
-	log.Fields{"address": *addressFlag}.Info("starting http server")
-	w := log.Writer()
-	defer w.Close()
-	s := &http.Server{
-		Addr:           *addressFlag,
-		Handler:        router(),
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
-		ErrorLog:       stdlog.New(w, "", 0),
-	}
-	if err := s.ListenAndServe(); err != nil {
-		log.Fields{"error": err}.Info("unexpected error from http server")
+	wait := make(chan error)
+	go signalHandler(func() { wait <- nil })
+	go func() { wait <- server.Server(*addressFlag) }()
+
+	if err := <-wait; err != nil {
+		log.Fields{"error": err}.Fatal("server crashed unexpectedly")
 	}
 }
 
