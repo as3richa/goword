@@ -13,6 +13,6 @@ for FILE in $(ls ./client/*.html | xargs -n1 basename); do
     --remove-attribute-quotes \
     client/$FILE > static/$FILE
 done
-minify --output static/script.js client/main.js > /dev/null
+uglifyjs client/*.js -o static/script.js --compress --dead-code --evaluate --unused
 minify --output static/style.css client/style.css > /dev/null
 cp client/*.ico client/*.svg static

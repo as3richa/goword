@@ -19,7 +19,7 @@ var staticRoutes = map[string]staticFile{
 	"/":            {path.Join("static", "index.html"), "text/html"},
 	"/favicon.ico": {path.Join("static", "favicon.ico"), "image/x-icon"},
 	"/style.css":   {path.Join("static", "style.css"), "text/css"},
-	"/scripts.js":  {path.Join("static", "scripts.js"), "application/javascript"},
+	"/script.js":  {path.Join("static", "script.js"), "application/javascript"},
 	"/compass.svg": {path.Join("static", "compass.svg"), "image/svg+xml"},
 	"/skull.svg":   {path.Join("static", "skull.svg"), "image/svg+xml"},
 
