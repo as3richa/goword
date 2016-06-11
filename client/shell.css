@@ -7,7 +7,6 @@ html, body {
   height: 100%;
   margin: 0;
   padding: 0.5em;
-  font-family: 'Roboto', sans-serif;
 }
 
 #console {
@@ -19,8 +18,13 @@ html, body {
 
 #input {
   width: 100%;
-  font-family: Roboto;
+  font-family: "Roboto Mono";
   font-size: large;
   margin-top: 0.5em;
   border: 1px solid black;
+}
+
+pre {
+  margin: 0;
+  font-family: "Roboto Mono";
 }
