@@ -16,10 +16,16 @@ type staticFile struct {
 }
 
 var staticRoutes = map[string]staticFile{
-	"/":            {path.Join("static", "index.html"), "text/html"},
+	"/":      {path.Join("static", "index.html"), "text/html"},
+	"/shell": {path.Join("static", "shell.html"), "text/html"},
+
 	"/favicon.ico": {path.Join("static", "favicon.ico"), "image/x-icon"},
-	"/style.css":   {path.Join("static", "style.css"), "text/css"},
-	"/script.js":  {path.Join("static", "script.js"), "application/javascript"},
+
+	"/style.css": {path.Join("static", "style.css"), "text/css"},
+	"/shell.css": {path.Join("static", "shell.css"), "text/css"},
+
+	"/script.js": {path.Join("static", "script.js"), "application/javascript"},
+
 	"/compass.svg": {path.Join("static", "compass.svg"), "image/svg+xml"},
 	"/skull.svg":   {path.Join("static", "skull.svg"), "image/svg+xml"},
 

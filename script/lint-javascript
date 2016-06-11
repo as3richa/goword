@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euxo pipefail
+
+jshint client/*.js.d/*.js

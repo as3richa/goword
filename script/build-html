@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euxo pipefail
+
+for FILE in $(ls ./client/*.html | xargs -n1 basename); do
+  html-minifier \
+    --html-5 \
+    --remove-comments \
+    --collapse-whitespace \
+    --remove-attribute-quotes \
+    client/$FILE > static/$FILE
+done

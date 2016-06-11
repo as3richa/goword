@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euxo pipefail
+
+for DIR in $(echo ./client/*.js.d | xargs -n1 basename); do
+  uglifyjs client/$DIR/*.js -o static/$(echo $DIR | sed -E "s/.{2}$//") --compress --dead-code --evaluate --unused
+done

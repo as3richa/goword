@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euxo pipefail
+
+cp client/*.ico client/*.svg static

@@ -2,17 +2,8 @@
 set -euxo pipefail
 
 mkdir -p static/
-
-jshint client/*.js
-
-for FILE in $(ls ./client/*.html | xargs -n1 basename); do
-  html-minifier \
-    --html-5 \
-    --remove-comments \
-    --collapse-whitespace \
-    --remove-attribute-quotes \
-    client/$FILE > static/$FILE
-done
-uglifyjs client/*.js -o static/script.js --compress --dead-code --evaluate --unused
-minify --output static/style.css client/style.css > /dev/null
-cp client/*.ico client/*.svg static
+script/lint-javascript
+script/build-html
+script/build-javascript
+script/build-css
+script/build-images
