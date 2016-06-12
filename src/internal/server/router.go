@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"net"
+	"bufio"
 
 	"internal/log"
 
@@ -16,6 +18,7 @@ func router() http.Handler {
 	for route := range staticRoutes {
 		router.GET(route, staticHandler)
 	}
+	router.HandlerFunc("GET", "/engine", engineHandler)
 
 	router.RedirectTrailingSlash = true
 	router.RedirectFixedPath = true
@@ -32,21 +35,33 @@ func router() http.Handler {
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	code int
+	hijacked bool
 }
 
 func (l *loggingResponseWriter) WriteHeader(code int) {
-	l.ResponseWriter.WriteHeader(code)
 	l.code = code
+	l.ResponseWriter.WriteHeader(code)
 }
 
 func (l *loggingResponseWriter) Write(data []byte) (int, error) {
 	return l.ResponseWriter.Write(data)
 }
 
+func (l *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	l.hijacked = true
+	return l.ResponseWriter.(http.Hijacker).Hijack()
+}
+
 func loggingHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lw := &loggingResponseWriter{ResponseWriter: w, code: http.StatusOK}
 		h.ServeHTTP(lw, r)
-		log.Fields{"url": r.URL.String(), "method": r.Method, "source": r.RemoteAddr, "response": lw.code}.Info("handled request")
+		log.Fields{
+			"url": r.URL.String(),
+			"method": r.Method,
+			"source": r.RemoteAddr,
+			"response": lw.code,
+			"hijacked": lw.hijacked,
+		}.Info("handled request")
 	})
 }

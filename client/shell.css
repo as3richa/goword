@@ -9,11 +9,16 @@ html, body {
   padding: 0.5em;
 }
 
-#console {
+#frame {
   width: 100%;
   height: 95%;
   border: 1px solid black;
   padding: 0.5em;
+}
+
+#console {
+  margin: 0;
+  font-family: "Roboto Mono";
 }
 
 #input {
@@ -22,9 +27,4 @@ html, body {
   font-size: large;
   margin-top: 0.5em;
   border: 1px solid black;
-}
-
-pre {
-  margin: 0;
-  font-family: "Roboto Mono";
 }
