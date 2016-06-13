@@ -29,6 +29,10 @@
       print("= Connection closed.\n");
     });
 
+    socket.addEventListener("message", function(message) {
+      print("< " + message.data + "\n");
+    });
+
     inputElement.addEventListener("keydown", function(event) {
       var string = inputElement.value;
       if(event.keyCode === 13 && string !== "") {
@@ -39,12 +43,79 @@
     });
   }
 
+  function handleInput(string) {
+    /*if(socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(string);
+        print("> " + string + "\n");
+      } catch(err) {
+        print("! " + string + "\n");
+      }
+    } else {
+      print("= Not connected.\n");
+    }*/
+    print("> " + string + "\n");
+    parseCommand(string).forEach(function(token) {
+      print("< " + token + "\n");
+    });
+  }
+
   function print(string) {
     consoleElement.appendChild(document.createTextNode(string));
   }
 
-  function handleInput(string) {
-    print("> " + string + "\n");
+  function parseCommand(string) {
+    var tokens = [];
+
+    function skipWhitespace(index) {
+      while(index < string.length && /\s/.test(string[index])) {
+        index ++;
+      }
+      return index;
+    }
+
+    function parseToken(index) {
+      if(index >= string.length) {
+        return;
+      }
+
+      var right = index;
+
+      if(string[index] != "\"" && string[index] != "'") {
+        while(right < string.length && !(/\s/.test(string[right]))) {
+          right ++;
+        }
+        tokens.push(string.substring(index, right));
+      } else {
+        var escapeState = false;
+        var token = "";
+
+        while(++ right < string.length) {
+          if(escapeState) {
+            escapeState = false;
+            token += string[right];
+          } else if(string[right] === "\\") {
+            escapeState = true;
+          } else if(string[right] === string[index]) {
+            right ++;
+            break;
+          } else {
+            token += string[right];
+          }
+        }
+
+        tokens.push(token);
+      }
+
+      return right;
+    }
+
+    for(var index = 0; index < string.length;) {
+      index = skipWhitespace(index);
+      index = parseToken(index);
+    }
+
+    return tokens;
   }
 
   window.addEventListener("load", initialize);

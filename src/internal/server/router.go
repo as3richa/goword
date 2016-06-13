@@ -1,9 +1,9 @@
 package server
 
 import (
-	"net/http"
-	"net"
 	"bufio"
+	"net"
+	"net/http"
 
 	"internal/log"
 
@@ -18,7 +18,7 @@ func router() http.Handler {
 	for route := range staticRoutes {
 		router.GET(route, staticHandler)
 	}
-	router.HandlerFunc("GET", "/engine", engineHandler)
+	router.GET("/engine", engineHandler)
 
 	router.RedirectTrailingSlash = true
 	router.RedirectFixedPath = true
@@ -34,7 +34,7 @@ func router() http.Handler {
 
 type loggingResponseWriter struct {
 	http.ResponseWriter
-	code int
+	code     int
 	hijacked bool
 }
 
@@ -57,9 +57,9 @@ func loggingHandler(h http.Handler) http.Handler {
 		lw := &loggingResponseWriter{ResponseWriter: w, code: http.StatusOK}
 		h.ServeHTTP(lw, r)
 		log.Fields{
-			"url": r.URL.String(),
-			"method": r.Method,
-			"source": r.RemoteAddr,
+			"url":      r.URL.String(),
+			"method":   r.Method,
+			"source":   r.RemoteAddr,
 			"response": lw.code,
 			"hijacked": lw.hijacked,
 		}.Info("handled request")
