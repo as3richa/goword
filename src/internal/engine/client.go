@@ -9,15 +9,24 @@ func (c *Client) wrapMessage(m Message) wrappedMessage {
 
 func (e *Engine) NewClient() *Client {
 	client := &Client{
-		container: e,
-		Pipe:      make(chan Response, clientBufferSize),
+		alive:        true,
+		messagePipe:  e.pipe,
+		ResponsePipe: make(chan Response, clientBufferSize),
 	}
 
-	e.Send(client.wrapMessage(connectMessage{}))
+	client.SendFrom(connectMessage{})
 
 	return client
 }
 
-func (c *Client) Send(r Response) {
-	c.Pipe <- r
+func (c *Client) SendTo(r Response) {
+	c.ResponsePipe <- r
+}
+
+func (c *Client) SendFrom(m Message) {
+	c.messagePipe <- c.wrapMessage(m)
+}
+
+func (c *Client) Quit() {
+	c.SendFrom(quitMessage{})
 }

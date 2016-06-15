@@ -5,12 +5,13 @@ import (
 	"net"
 	"net/http"
 
+	"internal/engine"
 	"internal/log"
 
 	"github.com/julienschmidt/httprouter"
 )
 
-func router() http.Handler {
+func router(engine *engine.Engine) http.Handler {
 	router := httprouter.New()
 
 	router.GET("/internal/grid/", gridHandler)
@@ -18,7 +19,7 @@ func router() http.Handler {
 	for route := range staticRoutes {
 		router.GET(route, staticHandler)
 	}
-	router.GET("/engine", engineHandler)
+	router.GET("/engine", engineHandler(engine))
 
 	router.RedirectTrailingSlash = true
 	router.RedirectFixedPath = true

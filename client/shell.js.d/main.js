@@ -44,7 +44,7 @@
   }
 
   function handleInput(string) {
-    /*if(socket.readyState === WebSocket.OPEN) {
+    if(socket.readyState === WebSocket.OPEN) {
       try {
         socket.send(string);
         print("> " + string + "\n");
@@ -53,11 +53,7 @@
       }
     } else {
       print("= Not connected.\n");
-    }*/
-    print("> " + string + "\n");
-    parseCommand(string).forEach(function(token) {
-      print("< " + token + "\n");
-    });
+    }
   }
 
   function print(string) {

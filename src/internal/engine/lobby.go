@@ -1,5 +1,8 @@
 package engine
 
-func (l *lobby) Send(m wrappedMessage) {
-	l.pipe <- m
+func (e *Engine) NewLobby(name, password string) *lobby {
+	return &lobby{
+		name:     name,
+		password: password,
+	}
 }

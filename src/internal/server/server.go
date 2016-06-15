@@ -5,16 +5,17 @@ import (
 	"net/http"
 	"time"
 
+	"internal/engine"
 	"internal/log"
 )
 
-func Server(address string) error {
+func Server(address string, engine *engine.Engine) error {
 	log.Fields{"address": address}.Info("starting http server")
 	w := log.Writer()
 	defer w.Close()
 	s := &http.Server{
 		Addr:           address,
-		Handler:        router(),
+		Handler:        router(engine),
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
