@@ -1,33 +1,8 @@
 package engine
 
-import (
-	"fmt"
-	"strings"
-	"time"
+import "internal/log"
 
-	"internal/log"
-)
-
-const clientBufferSize = 16
 const serverBufferSize = 1024
-
-type Client struct {
-	alive        bool
-	messagePipe  chan wrappedMessage
-	ResponsePipe chan Response
-}
-
-type lobby struct {
-	name     string
-	password string
-
-	timerShutdown chan struct{}
-	timer         *time.Timer
-
-	clientMetadata map[*Client]struct {
-		name string
-	}
-}
 
 type Engine struct {
 	lobbies map[string]*lobby
@@ -50,58 +25,60 @@ func (e *Engine) Run() {
 
 		log.Debug("engine received message")
 
+		var response Response
+
 		switch message := wrap.Message.(type) {
 		case connectMessage:
-			if _, ok := e.clients[client]; ok {
-				log.Panic("client connected twice")
-			}
-			e.clients[client] = struct{}{}
-			client.SendTo(connectResponse{
-				Command: "connect",
-				Ok:      true,
-				Motd:    "Hello!",
-			})
+			response = e.connectClient(client)
 		case quitMessage:
-			if !client.alive {
-				return
-			}
-			client.alive = false
-			client.SendTo(quitResponse{
-				Command: "quit",
-				Ok:      true,
-				Message: "Goodnight.",
-			})
-			close(client.ResponsePipe)
-			delete(e.clients, client)
+			response = e.quitClient(client)
 		case joinLobbyMessage:
-			message.Name = strings.TrimSpace(message.Name)
-			normalizedName := strings.ToLower(message.Name)
-
-			_, ok := e.lobbies[normalizedName]
-			if !ok {
-				e.lobbies[normalizedName] = e.NewLobby(message.Name, message.Password)
-				log.Fields{"name": normalizedName, "password": message.Password}.Info("created lobby")
-			}
-
-			if err := fmt.Errorf("unimplemented :)"); err != nil {
-				client.SendTo(joinLobbyResponse{
-					Command: "join",
-					Ok:      false,
-					Message: err.Error(),
-				})
-			} else {
-				client.SendTo(joinLobbyResponse{
-					Command: "join",
-					Ok:      true,
-					Message: ":)",
-				})
-			}
+			response = e.joinClientToLobby(client, message.Name, message.Password, message.Nickname)
 		default:
-			client.SendTo(badMessageResponse{
+			response = badMessageResponse{
 				Command: "???",
 				Ok:      false,
 				Message: "malformed message",
-			})
+			}
 		}
+
+		if response != nil {
+			client.SendTo(response)
+		}
+
+		if _, ok := response.(quitResponse); ok {
+			close(client.ResponsePipe)
+		}
+	}
+}
+
+func (e *Engine) connectClient(client *Client) Response {
+	if _, ok := e.clients[client]; ok {
+		log.Panic("client connected twice")
+	}
+
+	e.clients[client] = struct{}{}
+	return connectResponse{
+		Command: "connect",
+		Ok:      true,
+		Message: "you are now connected",
+	}
+}
+
+func (e *Engine) quitClient(client *Client) Response {
+	if !client.alive {
+		return nil
+	}
+	client.alive = false
+
+	if _, ok := e.clients[client]; !ok {
+		log.Panic("client quitting, but wasn't connected")
+	}
+	delete(e.clients, client)
+
+	return quitResponse{
+		Command: "quit",
+		Ok:      true,
+		Message: "goodnight",
 	}
 }

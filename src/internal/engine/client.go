@@ -1,5 +1,14 @@
 package engine
 
+const clientBufferSize = 16
+
+type Client struct {
+	alive        bool
+	lobby        *lobby
+	messagePipe  chan wrappedMessage
+	ResponsePipe chan Response
+}
+
 func (c *Client) wrapMessage(m Message) wrappedMessage {
 	return wrappedMessage{
 		Client:  c,

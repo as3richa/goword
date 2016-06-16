@@ -9,16 +9,15 @@ html, body {
   padding: 0.5em;
 }
 
-#frame {
+#console {
   width: 100%;
   height: 95%;
   border: 1px solid black;
   padding: 0.5em;
-}
-
-#console {
-  margin: 0;
   font-family: "Roboto Mono";
+  word-wrap: break-word;
+  overflow-y: scroll;
+  white-space: pre-wrap;
 }
 
 #input {

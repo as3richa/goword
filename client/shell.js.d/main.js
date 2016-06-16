@@ -13,24 +13,24 @@
     var proto = (window.location.protocol === "http:") ? "ws:" : "wss:";
     var path = proto + "//" + window.location.hostname + ":" + window.location.port + "/engine";
 
-    print("= Trying to connect to " + path + "...\n");
+    print("= Trying to connect to " + path + "...");
 
     socket = new WebSocket(path);
 
     socket.addEventListener("open", function() {
-      print("= Successfully connected to " + path + ".\n");
+      print("= Successfully connected to " + path + ".");
     });
 
     socket.addEventListener("error", function() {
-      print("= Network error.\n");
+      print("= Network error.");
     });
 
     socket.addEventListener("close", function() {
-      print("= Connection closed.\n");
+      print("= Connection closed.");
     });
 
     socket.addEventListener("message", function(message) {
-      print("< " + message.data + "\n");
+      print("< " + message.data + "");
     });
 
     inputElement.addEventListener("keydown", function(event) {
@@ -43,21 +43,74 @@
     });
   }
 
+  var commands = {
+    "join": function() {
+      if(arguments.length !== 3) {
+        print("< /join takes exactly 3 arguments");
+        console.log(arguments);
+        return;
+      }
+
+      sendJSON({
+        "command": "join",
+        "name": arguments[0],
+        "password": arguments[1],
+        "nickname": arguments[2]
+      });
+    },
+    "help": function() {
+      print(
+        "< Commands:\n" +
+        "<  /join <lobby name> <password> <nickname> - attempts to join a lobby\n" +
+        "<  /help: shows this dialog"
+      );
+    }
+  };
+
   function handleInput(string) {
+    var parameters = parseCommand(string);
+    var fn;
+
+    print("> " + string);
+    if(parameters[0] && parameters[0][0] === '/' && (fn = commands[parameters[0].substring(1)])) {
+      fn.apply(null, parameters.slice(1), 1);
+    } else {
+      print("! Unknown command.");
+    }
+  }
+
+  function sendJSON(object) {
+    var string = JSON.stringify(object);
     if(socket.readyState === WebSocket.OPEN) {
       try {
         socket.send(string);
-        print("> " + string + "\n");
+        print("> " + string);
       } catch(err) {
-        print("! " + string + "\n");
+        print("! " + string);
       }
     } else {
-      print("= Not connected.\n");
+      print("= Not connected.");
     }
   }
 
   function print(string) {
-    consoleElement.appendChild(document.createTextNode(string));
+    var scrolledDown = (consoleElement.scrollHeight * 0.95 - consoleElement.scrollTop <= consoleElement.clientHeight);
+    var lines = string.split('\n');
+    var frag = document.createDocumentFragment();
+
+    lines.forEach(function(line) {
+      if(line === "") {
+        return;
+      }
+      frag.appendChild(document.createTextNode(line));
+      frag.appendChild(document.createElement("br"));
+    });
+
+    consoleElement.appendChild(frag);
+
+    if(scrolledDown) {
+      consoleElement.scrollTop = consoleElement.scrollHeight;
+    }
   }
 
   function parseCommand(string) {
@@ -77,7 +130,7 @@
 
       var right = index;
 
-      if(string[index] != "\"" && string[index] != "'") {
+      if(string[index] != '"' && string[index] != '\'') {
         while(right < string.length && !(/\s/.test(string[right]))) {
           right ++;
         }

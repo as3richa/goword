@@ -17,7 +17,7 @@ type connectMessage struct{}
 type connectResponse struct {
 	Command string `json:"command"`
 	Ok      bool   `json:"ok"`
-	Motd    string `json:"motd"`
+	Message string `json:"message"`
 }
 
 type quitMessage struct{}
@@ -30,12 +30,13 @@ type quitResponse struct {
 type joinLobbyMessage struct {
 	Name     string
 	Password string
+	Nickname string
 }
 type joinLobbyResponse struct {
 	Command string   `json:"command"`
 	Ok      bool     `json:"ok"`
-	Message string   `json:"message,omitEmpty"`
-	Players []string `json:"players,omitEmpty"`
+	Message string   `json:"message,omitempty"`
+	Players []string `json:"players,omitempty"`
 }
 
 type leaveLobbyMessage struct{}
@@ -57,6 +58,7 @@ func UnmarshalMessage(data []byte) (Message, error) {
 		return joinLobbyMessage{
 			Name:     object["name"],
 			Password: object["password"],
+			Nickname: object["nickname"],
 		}, nil
 	case "quit":
 		return quitMessage{}, nil
