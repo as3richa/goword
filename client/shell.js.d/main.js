@@ -47,7 +47,6 @@
     "join": function() {
       if(arguments.length !== 3) {
         print("< /join takes exactly 3 arguments");
-        console.log(arguments);
         return;
       }
 
@@ -58,11 +57,20 @@
         "nickname": arguments[2]
       });
     },
+    "part": function() {
+      if(arguments.length !== 0) {
+        print("< /part takes no arguments");
+        return;
+      }
+
+      sendJSON({"command": "part"});
+    },
     "help": function() {
       print(
         "< Commands:\n" +
         "<  /join <lobby name> <password> <nickname> - attempts to join a lobby\n" +
-        "<  /help: shows this dialog"
+        "<  /part                                    - attempts to leave the lobby\n" +
+        "<  /help                                    - shows this dialog"
       );
     }
   };

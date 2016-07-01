@@ -39,7 +39,13 @@ type joinLobbyResponse struct {
 	Players []string `json:"players,omitempty"`
 }
 
-type leaveLobbyMessage struct{}
+type partLobbyMessage struct{}
+type partLobbyResponse struct {
+	Command string   `json:"command"`
+	Ok      bool     `json:"ok"`
+	Message string   `json:"message"`
+	Players []string `json:"players,omitempty"`
+}
 
 type badMessageResponse struct {
 	Command string `json:"command"`
@@ -60,6 +66,8 @@ func UnmarshalMessage(data []byte) (Message, error) {
 			Password: object["password"],
 			Nickname: object["nickname"],
 		}, nil
+	case "part":
+		return partLobbyMessage{}, nil
 	case "quit":
 		return quitMessage{}, nil
 	case "":

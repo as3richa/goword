@@ -34,6 +34,8 @@ func (e *Engine) Run() {
 			response = e.quitClient(client)
 		case joinLobbyMessage:
 			response = e.joinClientToLobby(client, message.Name, message.Password, message.Nickname)
+		case partLobbyMessage:
+			response = e.partClientFromLobby(client)
 		default:
 			response = badMessageResponse{
 				Command: "???",
@@ -75,6 +77,8 @@ func (e *Engine) quitClient(client *Client) Response {
 		log.Panic("client quitting, but wasn't connected")
 	}
 	delete(e.clients, client)
+
+	_ = e.partClientFromLobby(client)
 
 	return quitResponse{
 		Command: "quit",

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -19,9 +20,11 @@ type lobby struct {
 	timer         *time.Timer
 
 	nicknames      map[string]struct{}
-	clientMetadata map[*Client]struct {
-		nickname string
-	}
+	clientMetadata map[*Client]metadata
+}
+
+type metadata struct {
+	nickname string
 }
 
 func (l *lobby) players() []string {
@@ -34,9 +37,10 @@ func (l *lobby) players() []string {
 
 func (e *Engine) newLobby(name, password string) *lobby {
 	return &lobby{
-		name:      name,
-		password:  password,
-		nicknames: map[string]struct{}{},
+		name:           name,
+		password:       password,
+		nicknames:      map[string]struct{}{},
+		clientMetadata: map[*Client]metadata{},
 	}
 }
 
@@ -94,11 +98,68 @@ func (e *Engine) joinClientToLobby(client *Client, name, password, nickname stri
 
 	client.lobby = lobby
 	lobby.nicknames[normalizedNickname] = struct{}{}
+	lobby.clientMetadata[client] = metadata{
+		nickname: nickname,
+	}
 
-	return joinLobbyResponse{
+	response := joinLobbyResponse{
 		Command: "join",
 		Ok:      true,
 		Message: "you have joined the lobby",
 		Players: lobby.players(),
 	}
+
+	peerResponse := joinLobbyResponse{
+		Command: "join",
+		Ok:      true,
+		Message: fmt.Sprintf("%s has joined the lobby", nickname),
+		Players: lobby.players(),
+	}
+
+	for peer := range lobby.clientMetadata {
+		if client == peer {
+			continue
+		}
+		peer.SendTo(peerResponse)
+	}
+
+	return response
+}
+
+func (e *Engine) partClientFromLobby(client *Client) Response {
+	if client.lobby == nil {
+		return partLobbyResponse{
+			Command: "part",
+			Ok:      false,
+			Message: "you are not joined to a lobby",
+		}
+	}
+
+	lobby := client.lobby
+	client.lobby = nil
+	meta := lobby.clientMetadata[client]
+	delete(lobby.nicknames, meta.nickname)
+	delete(lobby.clientMetadata, client)
+
+	response := partLobbyResponse{
+		Command: "part",
+		Ok:      true,
+		Message: "you have left the lobby",
+	}
+
+	peerResponse := partLobbyResponse{
+		Command: "part",
+		Ok:      true,
+		Message: fmt.Sprintf("%s has left the lobby", meta.nickname),
+		Players: lobby.players(),
+	}
+
+	for peer := range lobby.clientMetadata {
+		if client == peer {
+			continue
+		}
+		peer.SendTo(peerResponse)
+	}
+
+	return response
 }
