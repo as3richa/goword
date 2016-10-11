@@ -313,6 +313,10 @@ func (l *lobby) transitionToAwaitingPlayers() {
 	log.Fields{"lobby": l.name}.Debug("state transition to awaitingPlayers")
 	l.resetAsync(forever)
 	l.state = awaitingPlayers
+	for client := range l.clients {
+		l.clients[client].playing = true
+		l.clients[client].readied = false
+	}
 }
 
 func (l *lobby) transitionToBetweenGames() {

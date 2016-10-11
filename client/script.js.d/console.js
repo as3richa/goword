@@ -1,4 +1,4 @@
-function initializeConsole(commands) {
+function initializeConsole(commands, defaultCommand) {
   "use strict";
 
   var helpDialog;
@@ -86,15 +86,26 @@ function initializeConsole(commands) {
 
   function handleInput(string) {
     var parameters = parseCommand(string);
-    var cmd, fn, arity;
+    var name, cmd, fn, arity;
 
     myConsole.print("> " + string);
-    if(parameters[0] && parameters[0][0] === '/' && (cmd = commands[parameters[0].substring(1)]) && (fn = cmd.callback)) {
+
+    if(parameters[0] && parameters[0][0] === '/') {
+      name = parameters[0].substring(1);
+      parameters = parameters.slice(1);
+    } else {
+      name = defaultCommand;
+    }
+
+    cmd = commands[name];
+
+    if(cmd) {
+      fn = cmd.callback;
       arity = cmd.arity;
-      if(arity === parameters.length - 1) {
-        fn.apply(myConsole, parameters.slice(1), 1);
+      if(arity === parameters.length) {
+        fn.apply(myConsole, parameters, 1);
       } else {
-        myConsole.print("! " + "**" + parameters[0] + "**" + " takes exactly " + arity + " parameter(s)", "#e00");
+        myConsole.print("! " + "**" + name + "**" + " takes exactly " + arity + " parameter(s)", "#e00");
       }
     } else {
       myConsole.print("! Unknown command", "#e00");

@@ -55,7 +55,7 @@
   };
 
   window.addEventListener("load", function() {
-    initializeConsole(commands);
+    initializeConsole(commands, "guess");
 
     var proto = (window.location.protocol === "http:") ? "ws:" : "wss:";
     var path = proto + "//" + window.location.hostname + ":" + window.location.port + "/engine";
