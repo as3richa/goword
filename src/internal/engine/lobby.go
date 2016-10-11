@@ -12,7 +12,7 @@ import (
 const forever = time.Hour * 10 * 1000
 const betweenGameDuration = 30 * time.Second
 const countdownDuration = 5 * time.Second
-const gameDuration = 10 * time.Second //3 * time.Minute
+const gameDuration = 3 * time.Minute
 
 const awaitingPlayers = "awaitingPlayers"
 const betweenGames = "betweenGames"
