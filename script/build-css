@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euxo pipefail
 
-for FILE in $(ls ./client/*.css | xargs -n1 basename); do
+for FILE in $(ls client/*.css | xargs -n1 basename); do
   minify --output static/$FILE client/$FILE > /dev/null
 done

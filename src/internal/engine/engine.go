@@ -1,88 +1,212 @@
 package engine
 
-import "internal/log"
+import (
+	"regexp"
+	"strings"
+	"time"
 
-const serverBufferSize = 1024
+	"internal/log"
+	"internal/nickname"
+)
+
+const heartbeatInterval = time.Second * 5
+
+const engineBuffering = 4096
+const clientBuffering = 128
+
+var lobbyNameRegex = regexp.MustCompile("^[\\w\\.-]+$")
+
+const lobbyTimeToLive = time.Second * 30
+
+type upstream struct {
+	newClientPipe chan *Client
+	quitPipe      chan *Client
+	joinPipe      chan clientLobbyNamePair
+	partPipe      chan *Client
+	readyPipe     chan *Client
+	guessPipe     chan clientGuessPair
+}
 
 type Engine struct {
-	lobbies map[string]*lobby
-	clients map[*Client]struct{}
-	pipe    chan wrappedMessage
+	upstream
+	usedNicknames map[string]struct{}
+}
+
+type Client struct {
+	ResponsePipe chan Response
+
+	upstream *upstream
+	nickname string
+}
+
+type Response struct {
+	Command  string                 `json:"command"`
+	Ok       bool                   `json:"ok"`
+	Message  string                 `json:"message,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type clientLobbyNamePair struct {
+	client    *Client
+	lobbyName string
+}
+
+type clientGuessPair struct {
+	client *Client
+	guess  string
+}
+
+func newUpstream() upstream {
+	return upstream{
+		newClientPipe: make(chan *Client, engineBuffering),
+		quitPipe:      make(chan *Client, engineBuffering),
+		joinPipe:      make(chan clientLobbyNamePair, engineBuffering),
+		partPipe:      make(chan *Client, engineBuffering),
+		readyPipe:     make(chan *Client, engineBuffering),
+		guessPipe:     make(chan clientGuessPair, engineBuffering),
+	}
 }
 
 func New() *Engine {
 	return &Engine{
-		lobbies: map[string]*lobby{},
-		clients: map[*Client]struct{}{},
-		pipe:    make(chan wrappedMessage, serverBufferSize),
+		upstream:      newUpstream(),
+		usedNicknames: map[string]struct{}{},
 	}
 }
 
 func (e *Engine) Run() {
+	usedNicknames := map[string]struct{}{}
+
+	lobbies := map[string]*lobby{}
+	lastLobbyJoin := map[string]time.Time{}
+
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
-		wrap := <-e.pipe
-		client := wrap.Client
+		select {
+		case newClient := <-e.newClientPipe:
+			var nick string
+			for {
+				nick = nickname.Generate()
+				if _, ok := e.usedNicknames[nick]; !ok {
+					break
+				}
+			}
+			e.usedNicknames[nick] = struct{}{}
+			newClient.nickname = nick
 
-		log.Debug("engine received message")
+			newClient.ResponsePipe <- Response{
+				Command: "nick",
+				Ok:      true,
+				Message: "You have connected to the server; you are known as " + nick,
+				Metadata: map[string]interface{}{
+					"nickname": nick,
+				},
+			}
 
-		var response Response
+		case quittingClient := <-e.quitPipe:
+			log.Fields{"client": quittingClient.nickname}.Debug("client quitting")
 
-		switch message := wrap.Message.(type) {
-		case connectMessage:
-			response = e.connectClient(client)
-		case quitMessage:
-			response = e.quitClient(client)
-		case joinLobbyMessage:
-			response = e.joinClientToLobby(client, message.Name, message.Password, message.Nickname)
-		case partLobbyMessage:
-			response = e.partClientFromLobby(client)
-		default:
-			response = badMessageResponse{
-				Command: "???",
+			delete(usedNicknames, quittingClient.nickname)
+			close(quittingClient.ResponsePipe)
+
+		case lobbyNameAndClient := <-e.joinPipe:
+			joiningClient := lobbyNameAndClient.client
+			lobbyName := lobbyNameAndClient.lobbyName
+			normalizedName := strings.ToLower(lobbyName)
+
+			if !lobbyNameRegex.MatchString(lobbyName) {
+				joiningClient.ResponsePipe <- Response{
+					Command: "join",
+					Ok:      false,
+					Message: "Lobby name may contain only letters, numbers, dashes, underscores, and periods, and may not be empty",
+					Metadata: map[string]interface{}{
+						"lobbyName": lobbyName,
+					},
+				}
+			} else {
+				var lobby *lobby
+				var ok bool
+
+				if lobby, ok = lobbies[normalizedName]; !ok {
+					lobby = e.newLobby(lobbyName)
+					lobbies[normalizedName] = lobby
+					lastLobbyJoin[normalizedName] = time.Now()
+					go lobby.run()
+				}
+
+				joiningClient.upstream = &lobby.upstream
+				lobby.newClientPipe <- joiningClient
+			}
+
+		case partingClient := <-e.partPipe:
+			partingClient.ResponsePipe <- Response{
+				Command: "part",
 				Ok:      false,
-				Message: "malformed message",
+				Message: "You are not joined to a lobby",
+			}
+
+		case readyClient := <-e.readyPipe:
+			readyClient.ResponsePipe <- Response{
+				Command: "ready",
+				Ok:      false,
+				Message: "You are not currently playing a game",
+			}
+
+		case guessAndClient := <-e.guessPipe:
+			guessAndClient.client.ResponsePipe <- Response{
+				Command: "guess",
+				Ok:      false,
+				Message: "You are not currently playing a game",
+			}
+
+		case <-heartbeat.C:
+			for lobbyName, lobby := range lobbies {
+				if lobby.empty() && time.Since(lastLobbyJoin[lobbyName]) > lobbyTimeToLive {
+					log.Fields{"lobby": lobbyName, "since": time.Since(lastLobbyJoin[lobbyName])}.Info("lobby is empty and not recently joined; GCing")
+					close(lobby.terminator)
+					delete(lobbies, lobbyName)
+					delete(lastLobbyJoin, lobbyName)
+				}
 			}
 		}
-
-		if response != nil {
-			client.SendTo(response)
-		}
-
-		if _, ok := response.(quitResponse); ok {
-			close(client.ResponsePipe)
-		}
 	}
 }
 
-func (e *Engine) connectClient(client *Client) Response {
-	if _, ok := e.clients[client]; ok {
-		log.Panic("client connected twice")
+func (e *Engine) NewClient() *Client {
+	client := &Client{
+		ResponsePipe: make(chan Response, clientBuffering),
+		upstream:     &e.upstream,
 	}
 
-	e.clients[client] = struct{}{}
-	return connectResponse{
-		Command: "connect",
-		Ok:      true,
-		Message: "you are now connected",
+	e.newClientPipe <- client
+
+	return client
+}
+
+func (c *Client) Quit() {
+	c.upstream.quitPipe <- c
+}
+
+func (c *Client) Join(lobbyName string) {
+	c.upstream.joinPipe <- clientLobbyNamePair{
+		client:    c,
+		lobbyName: lobbyName,
 	}
 }
 
-func (e *Engine) quitClient(client *Client) Response {
-	if !client.alive {
-		return nil
-	}
-	client.alive = false
+func (c *Client) Part() {
+	c.upstream.partPipe <- c
+}
 
-	if _, ok := e.clients[client]; !ok {
-		log.Panic("client quitting, but wasn't connected")
-	}
-	delete(e.clients, client)
+func (c *Client) Ready() {
+	c.upstream.readyPipe <- c
+}
 
-	_ = e.partClientFromLobby(client)
-
-	return quitResponse{
-		Command: "quit",
-		Ok:      true,
-		Message: "goodnight",
+func (c *Client) Guess(guess string) {
+	c.upstream.guessPipe <- clientGuessPair{
+		client: c,
+		guess:  guess,
 	}
 }

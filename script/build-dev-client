@@ -3,7 +3,7 @@ set -euxo pipefail
 
 mkdir -p static
 script/lint-javascript
-script/build-html
-script/build-javascript
-script/build-css
+cp client/*.html static
+script/build-dev-javascript
+cp client/*.css static
 script/build-images

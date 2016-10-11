@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -59,14 +60,32 @@ func newClient(engine *engine.Engine, ws *websocket.Conn) client {
 }
 
 func (c *client) Reader() {
+	defer log.Debug("HTTP engine reader terminating")
+
 	for {
 		_, data, err := c.ReadMessage()
 		if err != nil {
 			c.Quit()
 			return
 		}
-		message, err := engine.UnmarshalMessage(data)
-		c.SendFrom(message)
+
+		message := map[string]string{}
+		if err = json.Unmarshal(data, &message); err != nil {
+			log.Fields{"error": err}.Debug("error unmarshalling incoming JSON payload")
+			c.Quit()
+			return
+		}
+
+		switch message["command"] {
+		case "join":
+			c.Join(message["lobbyName"])
+		case "part":
+			c.Part()
+		case "ready":
+			c.Ready()
+		case "guess":
+			c.Guess(message["word"])
+		}
 	}
 }
 
@@ -75,6 +94,7 @@ func (c *client) Writer() {
 
 	defer ticker.Stop()
 	defer c.Close()
+	defer log.Debug("HTTP engine writer terminating")
 
 	for {
 		select {
@@ -84,12 +104,14 @@ func (c *client) Writer() {
 				return
 			}
 
-			data, err := engine.MarshalResponse(response)
+			data, err := json.Marshal(response)
 			if err != nil {
 				log.Fields{"error": err}.Panic("couldn't marshal response")
 			}
 
-			c.WriteMessage(websocket.TextMessage, data)
+			if err = c.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
 		case <-ticker.C:
 			if err := c.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
 				return

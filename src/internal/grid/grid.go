@@ -6,20 +6,19 @@ import (
 )
 
 type Grid [4][4]string
-type Cubes [4 * 4][6]string
 
 var r *rand.Rand = rand.New(rand.NewSource(time.Now().Unix()))
 
-func Generate(cubes Cubes, seedOutput *int64) Grid {
+func Generate(seedOutput *int64) Grid {
 	seed := r.Int63()
-	grid := GenerateFromSeed(cubes, seed)
+	grid := GenerateFromSeed(seed)
 	if seedOutput != nil {
 		*seedOutput = seed
 	}
 	return grid
 }
 
-func GenerateFromSeed(cubes Cubes, seed int64) Grid {
+func GenerateFromSeed(seed int64) Grid {
 	rand := rand.New(rand.NewSource(seed))
 	grid := Grid{}
 	i := 0

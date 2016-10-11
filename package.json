@@ -9,6 +9,7 @@
     "uglify-js": "^2.6.2"
   },
   "scripts": {
-    "postinstall": "script/build-client"
+    "postinstall": "script/build-client",
+    "build-dev-client": "script/build-dev-client" 
   }
 }

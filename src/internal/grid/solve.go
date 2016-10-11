@@ -12,7 +12,7 @@ type solveState struct {
 }
 type markTable map[solveState]bool
 
-func (g Grid) Solve(list wordlist.Wordlist) []string {
+func (g Grid) Solve() []string {
 	found := map[string]bool{}
 	visited := markTable{}
 	for i := 0; i < 4; i++ {
