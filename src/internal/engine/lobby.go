@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	betweenGameDuration = 30 * time.Second
+	betweenGameDuration = 1 * time.Minute
 	countdownDuration   = 5 * time.Second
 	gameDuration        = 3 * time.Minute
 )
