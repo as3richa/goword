@@ -293,9 +293,11 @@
     nicknameElem.appendChild(document.createTextNode(nickname));
 
     if(lobby && lobby.state === "inGame" && lobby.players[nickname].playing) {
-      inputElem.disabled = submitButtonElem.disabled = false;
+      inputElem.disabled = false;
+      submitButtonElem.disabled = false;
     } else {
-      inputElem.disabled = submitButtonElem.disabled = true;
+      inputElem.disabled = true;
+      submitButtonElem.disabled = true;
       inputElem.value = "";
     }
 
