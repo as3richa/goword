@@ -288,7 +288,7 @@ func (l *lobby) transitionToInGame() {
 
 func lobbyHandleNew(l *lobby, client *Client, _ interface{}) {
 	l.Clients[client] = &clientData{
-		Playing: false,
+		Playing: true,
 		Readied: false,
 		Score:   0,
 	}
