@@ -2,6 +2,8 @@ package grid
 
 import "strings"
 
+var scoreTable = [18]int{0, 0, 0, 1, 1, 2, 3, 5, 11, 18, 20, 22, 24, 26, 28, 30, 32, 34}
+
 func (g Grid) Score(lists [][]string) ([]int, [][]int) {
 	solution := g.Solve()
 	solutionSet := map[string]struct{}{}
@@ -21,33 +23,22 @@ func (g Grid) Score(lists [][]string) ([]int, [][]int) {
 		}
 	}
 
-	scores := [][]int{}
-	totals := []int{}
+	scores := make([][]int, len(lists))
+	totals := make([]int, len(lists))
 	for i, list := range lists {
-		totals = append(totals, 0)
-		scores = append(scores, nil)
+		totals[i] = 0
+		scores[i] = make([]int, len(list))
 
-		for _, word := range list {
+		for j, word := range list {
 			word = strings.ToUpper(word)
-			score := 0
 			if wordCounts[word] == 1 {
-				if len(word) <= 4 {
-					score = 1
-				} else if len(word) == 5 {
-					score = 2
-				} else if len(word) == 6 {
-					score = 3
-				} else if len(word) == 7 {
-					score = 5
-				} else if len(word) == 8 {
-					score = 11
-				} else {
-					score = 2 * len(word)
-				}
+				scores[i][j] = scoreTable[len(word)]
+			} else if _, ok := solutionSet[word]; !ok {
+				scores[i][j] = -1
+			} else {
+				scores[i][j] = 0
 			}
-
-			scores[i] = append(scores[i], score)
-			totals[i] += score
+			totals[i] += scores[i][j]
 		}
 	}
 

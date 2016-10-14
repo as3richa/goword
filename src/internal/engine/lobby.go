@@ -2,407 +2,383 @@ package engine
 
 import (
 	"fmt"
-	"sort"
+	"regexp"
 	"time"
 
 	"internal/grid"
 	"internal/log"
 )
 
-const forever = time.Hour * 10 * 1000
-const betweenGameDuration = 30 * time.Second
-const countdownDuration = 5 * time.Second
-const gameDuration = 3 * time.Minute
+const (
+	betweenGameDuration = 30 * time.Second
+	countdownDuration   = 5 * time.Second
+	gameDuration        = 3 * time.Minute
+)
 
-const awaitingPlayers = "awaitingPlayers"
-const betweenGames = "betweenGames"
-const countdown = "countdown"
-const inGame = "inGame"
+const (
+	stateAwaitingPlayers = "awaitingPlayers"
+	stateBetweenGames    = "betweenGames"
+	stateCountdown       = "countdown"
+	stateInGame          = "inGame"
+)
+
+var wordRegex = regexp.MustCompile("^[a-zA-Z]+$")
 
 type lobby struct {
-	name string
+	Name  string `json:"name"`
+	State string `json:"state"`
 
-	async          *time.Timer
+	asyncInterrupt *time.Timer
 	asyncTimestamp time.Time
 
-	terminator chan struct{}
-	upstream
-	parent *upstream
+	terminator         chan struct{}
+	incomingPipe       chan incomingMessage
+	parentIncomingPipe chan incomingMessage
 
-	clients map[*Client]*clientData
-	state   string
+	Clients clientSet `json:"players"`
 
-	grid grid.Grid
+	Grid grid.Grid `json:"grid"`
 }
 
+type clientSet map[*Client]*clientData
+
 type clientData struct {
-	playing bool
-	readied bool
-	guesses []string
+	Playing        bool `json:"playing"`
+	Readied        bool `json:"readied"`
+	Score          int  `json:"score"`
+	words          []string
+	PreviousResult *clientGameResult `json:"result,omitempty"`
+}
+
+type clientGameResult struct {
+	Score int          `json:"score"`
+	Words []scoredWord `json:"words"`
+}
+
+type scoredWord struct {
+	Word   string `json:"word"`
+	Points int    `json:"points"`
+}
+
+var lobbyDispatchTable = [messageTypeCount]func(*lobby, *Client, interface{}){
+	lobbyHandleNew,
+	lobbyHandleQuit,
+	lobbyHandleJoin,
+	lobbyHandlePart,
+	lobbyHandleReady,
+	lobbyHandleWord,
 }
 
 func (e *Engine) newLobby(name string) *lobby {
-	return &lobby{
-		name:       name,
-		async:      time.NewTimer(forever),
-		terminator: make(chan struct{}, 1),
-		upstream:   newUpstream(),
-		parent:     &e.upstream,
-		clients:    map[*Client]*clientData{},
-		state:      awaitingPlayers,
+	l := lobby{
+		Name:               name,
+		State:              stateAwaitingPlayers,
+		asyncInterrupt:     time.NewTimer(0),
+		asyncTimestamp:     time.Now(),
+		terminator:         make(chan struct{}, 1),
+		incomingPipe:       newIncomingPipe(),
+		parentIncomingPipe: e.incomingPipe,
+		Clients:            map[*Client]*clientData{},
+		Grid:               grid.Generate(nil),
 	}
+	l.clearAsyncInterrupt()
+	return &l
 }
 
 func (l *lobby) run() {
+	log.Fields{"lobby": l.Name}.Debug("lobby event loop starting")
+
 	for {
-		asyncEvent := false
-
 		select {
-		case <-l.async.C:
-			log.Fields{"lobby": l.name}.Debug("lobby async event fired")
-			asyncEvent = true
-
 		case <-l.terminator:
-			log.Fields{"lobby": l.name}.Debug("lobby terminating")
+			log.Fields{"lobby": l.Name}.Debug("lobby received termination signal; halting")
 			return
 
-		case newClient := <-l.newClientPipe:
-			l.clients[newClient] = &clientData{}
+		case message := <-l.incomingPipe:
+			lobbyDispatchTable[message.what](l, message.client, message.payload)
 
-			meta := l.metadata()
-
-			newClient.ResponsePipe <- Response{
-				Command:  "join",
-				Ok:       true,
-				Message:  "You have joined " + l.name,
-				Metadata: meta,
-			}
-
-			message := ""
-			if l.state == countdown || l.state == inGame {
-				message = "You will join the game in the next round"
-			}
-
-			newClient.ResponsePipe <- l.stateResponse(message)
-
-			peerResponse := Response{
-				Command:  "join",
-				Ok:       true,
-				Message:  newClient.nickname + " has joined " + l.name,
-				Metadata: meta,
-			}
-
-			for client := range l.clients {
-				if client != newClient {
-					client.ResponsePipe <- peerResponse
-				}
-			}
-
-		case quittingClient := <-l.quitPipe:
-			log.Fields{"lobby": l.name, "client": quittingClient.nickname}.Debug("client quitting")
-			l.partClient(quittingClient)
-			quittingClient.upstream = l.parent
-			quittingClient.Quit()
-
-		case lobbyNameAndClient := <-l.joinPipe:
-			joiningClient := lobbyNameAndClient.client
-
-			joiningClient.ResponsePipe <- Response{
-				Command: "join",
-				Ok:      false,
-				Message: "You are already joined to " + l.name,
-			}
-
-		case partingClient := <-l.partPipe:
-			log.Fields{"lobby": l.name, "client": partingClient.nickname}.Debug("client departing lobby")
-			l.partClient(partingClient)
-
-		case readyClient := <-l.readyPipe:
-			if l.state != betweenGames {
-				log.Fields{"lobby": l.name, "client": readyClient.nickname}.Debug("client readying up, but not between games")
-
-				readyClient.ResponsePipe <- Response{
-					Command: "ready",
-					Ok:      false,
-					Message: "You may only ready up between games",
-				}
-			} else {
-				log.Fields{"lobby": l.name, "client": readyClient.nickname}.Debug("client readying up")
-
-				l.clients[readyClient].readied = true
-				if count := l.readyPlayerCount(); count < len(l.clients) {
-					response := Response{
-						Command: "ready",
-						Ok:      true,
-						Message: fmt.Sprintf("%d of %d players are ready for the next game", count, len(l.clients)),
-					}
-
-					for client := range l.clients {
-						client.ResponsePipe <- response
-					}
-				}
-			}
-
-		case guessAndClient := <-l.guessPipe:
-			guessingClient := guessAndClient.client
-			guess := guessAndClient.guess
-
-			if l.state != inGame {
-				log.Fields{"lobby": l.name, "client": guessingClient.nickname}.Debug("client guessing, but not in game")
-
-				guessingClient.ResponsePipe <- Response{
-					Command: "ready",
-					Ok:      false,
-					Message: "You may only guess during a game",
-				}
-			} else {
-				log.Fields{"lobby": l.name, "client": guessingClient.nickname}.Debug("client guessing")
-
-				l.clients[guessingClient].guesses = append(l.clients[guessingClient].guesses, guess)
+		case <-l.asyncInterrupt.C:
+			if !time.Now().After(l.asyncTimestamp) {
+				l.resetAsyncInterrupt(l.asyncTimestamp.Sub(time.Now()))
 			}
 		}
 
-		l.attemptStateTransition(asyncEvent)
+		l.transitionState()
 	}
 }
 
-func (l *lobby) nicknames() []string {
-	nicknames := []string{}
-	for client := range l.clients {
-		nicknames = append(nicknames, client.nickname)
-	}
-	sort.Strings(nicknames)
-	return nicknames
+func (l *lobby) terminate() {
+	close(l.terminator)
 }
 
 func (l *lobby) empty() bool {
-	return len(l.clients) == 0
+	return len(l.Clients) == 0
 }
 
-func (l *lobby) partClient(partingClient *Client) {
-	delete(l.clients, partingClient)
-	partingClient.upstream = l.parent
-
-	partingClient.ResponsePipe <- Response{
-		Command: "part",
-		Ok:      true,
-		Message: "You have left " + l.name,
-	}
-
-	meta := l.metadata()
-
-	peerResponse := Response{
-		Command:  "part",
-		Ok:       true,
-		Message:  partingClient.nickname + " has left " + l.name,
-		Metadata: meta,
-	}
-
-	for client := range l.clients {
-		client.ResponsePipe <- peerResponse
-	}
-}
-
-func (l *lobby) stateResponse(message string) Response {
-	return Response{
-		Command:  "state",
-		Ok:       true,
-		Message:  message,
-		Metadata: l.metadata(),
-	}
-}
-
-func (l *lobby) metadata() map[string]interface{} {
-	result := map[string]interface{}{}
-
-	result["state"] = l.state
-	if remaining := l.asyncTimestamp.Sub(time.Now()); remaining < time.Hour {
-		result["remaining"] = (remaining + time.Second - 1) / time.Second
-	}
-
-	players := map[string]map[string]interface{}{}
-	for client, data := range l.clients {
-		players[client.nickname] = map[string]interface{}{
-			"playing": data.playing,
-			"readied": data.readied,
+func (l *lobby) readyPlayerCount() int {
+	total := 0
+	for _, data := range l.Clients {
+		if data.Readied {
+			total += 1
 		}
 	}
-
-	result["players"] = players
-
-	if l.state == inGame {
-		result["grid"] = l.grid
-	}
-
-	return result
+	return total
 }
 
-func (l *lobby) attemptStateTransition(asyncEvent bool) {
-	if asyncEvent && !time.Now().After(l.asyncTimestamp) {
-		delta := l.asyncTimestamp.Sub(time.Now())
-		log.Fields{"delta": delta}.Debug("async event fired early")
-		l.resetAsync(delta)
-		return
+func (l *lobby) clearAsyncInterrupt() {
+	l.asyncInterrupt.Stop()
+	select {
+	case <-l.asyncInterrupt.C:
+	default:
 	}
+	l.asyncTimestamp = time.Now()
+}
+
+func (l *lobby) resetAsyncInterrupt(d time.Duration) {
+	l.clearAsyncInterrupt()
+	l.asyncInterrupt.Reset(d)
+	l.asyncTimestamp = time.Now().Add(d)
+}
+
+func (l *lobby) broadcastState(memo string) {
+	for client := range l.Clients {
+		client.OutgoingPipe <- client.StateMessage(memo)
+	}
+}
+
+func (l *lobby) transitionState() {
+	asyncEvent := time.Now().After(l.asyncTimestamp)
 
 	transition := true
-	message := ""
+	memo := ""
 
-	switch l.state {
-	case awaitingPlayers:
-		if len(l.clients) >= 2 {
-			log.Fields{"lobby": l.name}.Debug("lobby was awaitingPlayers, but now sufficient players are here")
+	switch l.State {
+	case stateAwaitingPlayers:
+		if len(l.Clients) >= 2 {
+			log.Fields{"lobby": l.Name}.Debug("lobby was awaitingPlayers, but now sufficient players are here")
 			l.transitionToBetweenGames()
-			message = "Sufficient players"
+			memo = fmt.Sprintf("Sufficient players; countdown to next game starts in %d seconds", betweenGameDuration/time.Second)
 		} else {
 			transition = false
 		}
 
-	case betweenGames:
-		if len(l.clients) <= 1 {
-			log.Fields{"lobby": l.name}.Debug("lobby was betweenGames, but now insufficient players are here")
+	case stateBetweenGames:
+		if len(l.Clients) <= 1 {
+			log.Fields{"lobby": l.Name}.Debug("lobby was betweenGames, but now insufficient players are here")
 			l.transitionToAwaitingPlayers()
-			message = "Insufficient players"
+			memo = "Insufficient players to start the game; waiting for more..."
 		} else if asyncEvent {
-			log.Fields{"lobby": l.name}.Debug("lobby was betweenGames, but the timer has elapsed")
+			log.Fields{"lobby": l.Name}.Debug("lobby was betweenGames, but the timer has elapsed")
 			l.transitionToCountdown()
-			message = "Waiting period is over"
-		} else if l.readyPlayerCount() == len(l.clients) {
-			log.Fields{"lobby": l.name}.Debug("lobby was betweenGames, but all players have readied up")
+			memo = fmt.Sprintf("Waiting period is over; game starts in %d seconds", countdownDuration/time.Second)
+		} else if l.readyPlayerCount() == len(l.Clients) {
+			log.Fields{"lobby": l.Name}.Debug("lobby was betweenGames, but all players have readied up")
 			l.transitionToCountdown()
-			message = "Everyone is ready for the next round"
+			memo = fmt.Sprintf("Everyone is ready for the next game; game starts in %d seconds", countdownDuration/time.Second)
 		} else {
 			transition = false
 		}
 
-	case countdown:
-		if len(l.clients) <= 1 {
-			log.Fields{"lobby": l.name}.Debug("lobby was in countdown, but now insufficient players are here")
+	case stateCountdown:
+		if len(l.Clients) <= 1 {
+			log.Fields{"lobby": l.Name}.Debug("lobby was in countdown, but now insufficient players are here")
 			l.transitionToAwaitingPlayers()
-			message = "Insufficient players"
+			memo = "Insufficient players to start the game; waiting for more..."
 		} else if asyncEvent {
-			log.Fields{"lobby": l.name}.Debug("lobby was in countdown, but the timer has elapsed")
+			log.Fields{"lobby": l.Name}.Debug("lobby was in countdown, but the timer has elapsed")
 			l.transitionToInGame()
+			memo = "Game begin!"
 		} else {
 			transition = false
 		}
 
-	case inGame:
+	case stateInGame:
 		if asyncEvent {
-			log.Fields{"lobby": l.name}.Debug("lobby was inGame, but the timer has elapsed")
+			log.Fields{"lobby": l.Name}.Debug("lobby was inGame, but the timer has elapsed")
 			l.endGame()
-			if len(l.clients) <= 1 {
+			if len(l.Clients) <= 1 {
 				l.transitionToAwaitingPlayers()
 			} else {
 				l.transitionToBetweenGames()
 			}
+			memo = "Game has concluded"
+		} else if len(l.Clients) == 0 {
+			log.Fields{"lobby": l.Name}.Debug("lobby was inGame, but everyone has left")
+			l.transitionToAwaitingPlayers()
 		} else {
 			transition = false
 		}
 	}
 
 	if transition {
-		state := l.stateResponse(message)
-		for client := range l.clients {
-			client.ResponsePipe <- state
+		l.broadcastState(memo)
+	}
+}
+
+func (l *lobby) endGame() {
+	log.Fields{"lobby": l.Name}.Debug("game is over; scoring")
+
+	playingClientData := make([]*clientData, 0, len(l.Clients))
+	wordlists := make([][]string, 0, len(l.Clients))
+	for _, data := range l.Clients {
+		if !data.Playing {
+			data.PreviousResult = nil
+		} else {
+			playingClientData = append(playingClientData, data)
+			wordlists = append(wordlists, data.words)
+		}
+	}
+
+	log.Fields{"lobby": l.Name, "count": len(playingClientData)}.Debug("playing client count")
+
+	totals, scores := l.Grid.Score(wordlists)
+	for i, clientData := range playingClientData {
+		clientData.Score += totals[i]
+		clientData.PreviousResult = &clientGameResult{
+			Score: totals[i],
+			Words: make([]scoredWord, len(scores[i])),
+		}
+
+		for j, points := range scores[i] {
+			clientData.PreviousResult.Words[j] = scoredWord{
+				Word:   wordlists[i][j],
+				Points: points,
+			}
 		}
 	}
 }
 
 func (l *lobby) transitionToAwaitingPlayers() {
-	log.Fields{"lobby": l.name}.Debug("state transition to awaitingPlayers")
-	l.resetAsync(forever)
-	l.state = awaitingPlayers
-	for client := range l.clients {
-		l.clients[client].playing = true
-		l.clients[client].readied = false
+	log.Fields{"lobby": l.Name}.Debug("state transition to awaitingPlayers")
+	l.clearAsyncInterrupt()
+	l.State = stateAwaitingPlayers
+	for _, data := range l.Clients {
+		data.Playing = true
+		data.Readied = false
 	}
 }
 
 func (l *lobby) transitionToBetweenGames() {
-	log.Fields{"lobby": l.name}.Debug("state transition to betweenGames")
-	l.resetAsync(betweenGameDuration)
-	l.state = betweenGames
-	for client := range l.clients {
-		l.clients[client].playing = true
-		l.clients[client].readied = false
+	log.Fields{"lobby": l.Name}.Debug("state transition to betweenGames")
+	l.resetAsyncInterrupt(betweenGameDuration)
+	l.State = stateBetweenGames
+	for _, data := range l.Clients {
+		data.Playing = true
+		data.Readied = false
 	}
 }
 
 func (l *lobby) transitionToCountdown() {
-	log.Fields{"lobby": l.name}.Debug("state transition to countdown")
-	l.resetAsync(countdownDuration)
-	l.state = countdown
+	log.Fields{"lobby": l.Name}.Debug("state transition to countdown")
+	l.resetAsyncInterrupt(countdownDuration)
+	l.State = stateCountdown
+	for _, data := range l.Clients {
+		data.Readied = false
+		data.words = data.words[:0]
+		data.PreviousResult = nil
+	}
 }
 
 func (l *lobby) transitionToInGame() {
-	log.Fields{"lobby": l.name}.Debug("state transition to inGame")
-
-	l.resetAsync(gameDuration)
-	l.state = inGame
-
-	l.grid = grid.Generate(nil)
-	for _, data := range l.clients {
-		data.guesses = nil
-	}
+	l.resetAsyncInterrupt(gameDuration)
+	l.State = stateInGame
+	l.Grid = grid.Generate(nil)
+	log.Fields{"lobby": l.Name}.Debug("state transition to inGame")
 }
 
-func (l *lobby) endGame() {
-	playerNames := []string{}
-	lists := [][]string{}
+func lobbyHandleNew(l *lobby, client *Client, _ interface{}) {
+	l.Clients[client] = &clientData{
+		Playing: false,
+		Readied: false,
+		Score:   0,
+	}
+	l.broadcastState(client.Nickname + " has joined " + l.Name)
 
-	for client, datum := range l.clients {
-		if !datum.playing {
-			continue
-		}
-		playerNames = append(playerNames, client.nickname)
-		lists = append(lists, datum.guesses)
+	if l.State != stateAwaitingPlayers && l.State != stateBetweenGames {
+		client.OutgoingPipe <- client.StateMessage("A game is already in progress; you may join the next round of the game")
 	}
 
-	totals, scores := l.grid.Score(lists)
-
-	results := map[string]interface{}{}
-	for i, player := range playerNames {
-		result := map[string]interface{}{}
-		result["total"] = totals[i]
-
-		words := []interface{}{}
-		for j, word := range lists[i] {
-			words = append(words, []interface{}{word, scores[i][j]})
-		}
-
-		result["words"] = words
-
-		results[player] = result
-	}
-
-	response := Response{
-		Command:  "result",
-		Ok:       true,
-		Metadata: results,
-	}
-
-	for client := range l.clients {
-		client.ResponsePipe <- response
-	}
+	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client joined lobby")
 }
 
-func (l *lobby) resetAsync(d time.Duration) {
-	l.async.Stop()
-	select {
-	case <-l.async.C:
-	default:
-	}
-	l.asyncTimestamp = time.Now().Add(d)
-	l.async.Reset(d + 20*time.Millisecond)
+func lobbyHandleQuit(l *lobby, client *Client, _ interface{}) {
+	lobbyHandlePart(l, client, nil)
+	client.Quit()
 }
 
-func (l *lobby) readyPlayerCount() int {
-	total := 0
-	for _, datum := range l.clients {
-		if datum.readied {
-			total += 1
-		}
+func lobbyHandleJoin(l *lobby, client *Client, _ interface{}) {
+	client.OutgoingPipe <- clientErrorMessage{
+		Command: "join",
+		Message: "You are already in a lobby",
 	}
-	return total
+
+	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to join, but is already in a lobby")
+}
+
+func lobbyHandlePart(l *lobby, client *Client, _ interface{}) {
+	delete(l.Clients, client)
+	client.Lobby = nil
+	client.incomingPipe = l.parentIncomingPipe
+
+	client.OutgoingPipe <- client.StateMessage("You have left " + l.Name)
+	l.broadcastState(client.Nickname + " has left " + l.Name)
+
+	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client parted lobby")
+}
+
+func lobbyHandleReady(l *lobby, client *Client, _ interface{}) {
+	if l.State != stateBetweenGames {
+		client.OutgoingPipe <- clientErrorMessage{
+			Command: "ready",
+			Message: "You may only ready up between games",
+		}
+
+		log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to ready up, but lobby is not between games")
+		return
+	}
+
+	l.Clients[client].Readied = true
+	l.broadcastState(fmt.Sprintf("%s is ready for the next round; %d of %d players are ready", client.Nickname, l.readyPlayerCount(), len(l.Clients)))
+
+	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client has readied up")
+}
+
+func lobbyHandleWord(l *lobby, client *Client, data interface{}) {
+	word := data.(string)
+
+	if l.State != stateInGame {
+		client.OutgoingPipe <- clientErrorMessage{
+			Command: "word",
+			Message: "You may only record a word during a game",
+		}
+
+		log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to record a word, but lobby is not in-game")
+		return
+	}
+
+	if !l.Clients[client].Playing {
+		client.OutgoingPipe <- clientErrorMessage{
+			Command: "word",
+			Message: "You are not playing in the current game",
+		}
+
+		log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to record a word, but is not currently playing")
+		return
+	}
+
+	if !wordRegex.MatchString(word) {
+		client.OutgoingPipe <- clientErrorMessage{
+			Command: "word",
+			Message: "You may record only single, non-empty words, containing only letters",
+		}
+
+		log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to record a word, but word was malformed")
+		return
+	}
+
+	l.Clients[client].words = append(l.Clients[client].words, word)
+	client.OutgoingPipe <- clientWordMessage{
+		Word: word,
+	}
+	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client recorded a word")
 }

@@ -9,204 +9,139 @@ import (
 	"internal/nickname"
 )
 
-const heartbeatInterval = time.Second * 5
+const (
+	engineHeartbeatInterval = time.Second * 5
+	lobbyTimeToLive         = time.Second * 30
+)
 
-const engineBuffering = 4096
-const clientBuffering = 128
-
-var lobbyNameRegex = regexp.MustCompile("^[\\w\\.-]+$")
-
-const lobbyTimeToLive = time.Second * 30
-
-type upstream struct {
-	newClientPipe chan *Client
-	quitPipe      chan *Client
-	joinPipe      chan clientLobbyNamePair
-	partPipe      chan *Client
-	readyPipe     chan *Client
-	guessPipe     chan clientGuessPair
-}
+var lobbyNameRegex = regexp.MustCompile("^[\\w-]+$")
 
 type Engine struct {
-	upstream
-	usedNicknames map[string]struct{}
+	incomingPipe chan incomingMessage
+
+	nicknameGenerator nickname.Generator
+
+	lobbies  map[string]*lobby
+	joinedAt map[string]time.Time
 }
 
-type Client struct {
-	ResponsePipe chan Response
-
-	upstream *upstream
-	nickname string
-}
-
-type Response struct {
-	Command  string                 `json:"command"`
-	Ok       bool                   `json:"ok"`
-	Message  string                 `json:"message,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-}
-
-type clientLobbyNamePair struct {
-	client    *Client
-	lobbyName string
-}
-
-type clientGuessPair struct {
-	client *Client
-	guess  string
-}
-
-func newUpstream() upstream {
-	return upstream{
-		newClientPipe: make(chan *Client, engineBuffering),
-		quitPipe:      make(chan *Client, engineBuffering),
-		joinPipe:      make(chan clientLobbyNamePair, engineBuffering),
-		partPipe:      make(chan *Client, engineBuffering),
-		readyPipe:     make(chan *Client, engineBuffering),
-		guessPipe:     make(chan clientGuessPair, engineBuffering),
-	}
+var engineDispatchTable = [messageTypeCount]func(*Engine, *Client, interface{}){
+	engineHandleNew,
+	engineHandleQuit,
+	engineHandleJoin,
+	engineHandlePart,
+	engineHandleReady,
+	engineHandleWord,
 }
 
 func New() *Engine {
 	return &Engine{
-		upstream:      newUpstream(),
-		usedNicknames: map[string]struct{}{},
+		incomingPipe:      newIncomingPipe(),
+		nicknameGenerator: nickname.Generator{},
+		lobbies:           map[string]*lobby{},
+		joinedAt:          map[string]time.Time{},
 	}
 }
 
 func (e *Engine) Run() {
-	usedNicknames := map[string]struct{}{}
-
-	lobbies := map[string]*lobby{}
-	lastLobbyJoin := map[string]time.Time{}
-
-	heartbeat := time.NewTicker(heartbeatInterval)
-	defer heartbeat.Stop()
+	heartbeat := time.Tick(engineHeartbeatInterval)
 
 	for {
 		select {
-		case newClient := <-e.newClientPipe:
-			var nick string
-			for {
-				nick = nickname.Generate()
-				if _, ok := e.usedNicknames[nick]; !ok {
-					break
-				}
-			}
-			e.usedNicknames[nick] = struct{}{}
-			newClient.nickname = nick
+		case message := <-e.incomingPipe:
+			engineDispatchTable[message.what](e, message.client, message.payload)
 
-			newClient.ResponsePipe <- Response{
-				Command: "nick",
-				Ok:      true,
-				Message: "You have connected to the server; you are known as " + nick,
-				Metadata: map[string]interface{}{
-					"nickname": nick,
-				},
-			}
+		case <-heartbeat:
+			e.garbageCollectLobbies()
+		}
+	}
+}
 
-		case quittingClient := <-e.quitPipe:
-			log.Fields{"client": quittingClient.nickname}.Debug("client quitting")
-
-			delete(usedNicknames, quittingClient.nickname)
-			close(quittingClient.ResponsePipe)
-
-		case lobbyNameAndClient := <-e.joinPipe:
-			joiningClient := lobbyNameAndClient.client
-			lobbyName := lobbyNameAndClient.lobbyName
-			normalizedName := strings.ToLower(lobbyName)
-
-			if !lobbyNameRegex.MatchString(lobbyName) {
-				joiningClient.ResponsePipe <- Response{
-					Command: "join",
-					Ok:      false,
-					Message: "Lobby name may contain only letters, numbers, dashes, underscores, and periods, and may not be empty",
-					Metadata: map[string]interface{}{
-						"lobbyName": lobbyName,
-					},
-				}
-			} else {
-				var lobby *lobby
-				var ok bool
-
-				if lobby, ok = lobbies[normalizedName]; !ok {
-					lobby = e.newLobby(lobbyName)
-					lobbies[normalizedName] = lobby
-					lastLobbyJoin[normalizedName] = time.Now()
-					go lobby.run()
-				}
-
-				joiningClient.upstream = &lobby.upstream
-				lobby.newClientPipe <- joiningClient
-			}
-
-		case partingClient := <-e.partPipe:
-			partingClient.ResponsePipe <- Response{
-				Command: "part",
-				Ok:      false,
-				Message: "You are not joined to a lobby",
-			}
-
-		case readyClient := <-e.readyPipe:
-			readyClient.ResponsePipe <- Response{
-				Command: "ready",
-				Ok:      false,
-				Message: "You are not currently playing a game",
-			}
-
-		case guessAndClient := <-e.guessPipe:
-			guessAndClient.client.ResponsePipe <- Response{
-				Command: "guess",
-				Ok:      false,
-				Message: "You are not currently playing a game",
-			}
-
-		case <-heartbeat.C:
-			for lobbyName, lobby := range lobbies {
-				if lobby.empty() && time.Since(lastLobbyJoin[lobbyName]) > lobbyTimeToLive {
-					log.Fields{"lobby": lobbyName, "since": time.Since(lastLobbyJoin[lobbyName])}.Info("lobby is empty and not recently joined; GCing")
-					close(lobby.terminator)
-					delete(lobbies, lobbyName)
-					delete(lastLobbyJoin, lobbyName)
-				}
+func (e *Engine) garbageCollectLobbies() {
+	for lobbyName, lobby := range e.lobbies {
+		if lobby.empty() {
+			if delta := time.Since(e.joinedAt[lobbyName]); delta > lobbyTimeToLive {
+				log.Fields{"lobby": lobbyName, "delta": delta}.Info("lobby is empty and was not recently joined; garbage collecting")
+				lobby.terminate()
+				delete(e.lobbies, lobbyName)
+				delete(e.joinedAt, lobbyName)
 			}
 		}
 	}
 }
 
-func (e *Engine) NewClient() *Client {
-	client := &Client{
-		ResponsePipe: make(chan Response, clientBuffering),
-		upstream:     &e.upstream,
+func engineHandleNew(e *Engine, client *Client, _ interface{}) {
+	client.Nickname = e.nicknameGenerator.Generate()
+	client.OutgoingPipe <- client.StateMessage("Welcome to Goword; you are known as " + client.Nickname)
+	log.Fields{"client": client.Nickname}.Debug("new client connected to engine")
+}
+
+func engineHandleQuit(e *Engine, client *Client, _ interface{}) {
+	e.nicknameGenerator.Free(client.Nickname)
+	close(client.OutgoingPipe)
+	log.Fields{"client": client.Nickname}.Debug("client quit engine")
+}
+
+func engineHandleJoin(e *Engine, client *Client, data interface{}) {
+	lobbyName := data.(string)
+
+	if !lobbyNameRegex.MatchString(lobbyName) {
+		client.OutgoingPipe <- clientErrorMessage{
+			Command: "join",
+			Message: "Lobby name may contain only letters, numbers, dashes, and underscores, and may not be empty",
+		}
+		return
 	}
 
-	e.newClientPipe <- client
+	normalizedName := strings.ToLower(lobbyName)
 
-	return client
-}
+	var lobby *lobby
+	var ok bool
 
-func (c *Client) Quit() {
-	c.upstream.quitPipe <- c
-}
+	if lobby, ok = e.lobbies[normalizedName]; !ok {
+		log.Fields{"client": client.Nickname, "lobby": lobbyName}.Info("instantiating new lobby")
+		lobby = e.newLobby(lobbyName)
 
-func (c *Client) Join(lobbyName string) {
-	c.upstream.joinPipe <- clientLobbyNamePair{
-		client:    c,
-		lobbyName: lobbyName,
+		e.lobbies[normalizedName] = lobby
+		e.joinedAt[normalizedName] = time.Now()
+
+		go lobby.run()
 	}
-}
 
-func (c *Client) Part() {
-	c.upstream.partPipe <- c
-}
+	client.incomingPipe = lobby.incomingPipe
+	client.Lobby = lobby
 
-func (c *Client) Ready() {
-	c.upstream.readyPipe <- c
-}
-
-func (c *Client) Guess(guess string) {
-	c.upstream.guessPipe <- clientGuessPair{
-		client: c,
-		guess:  guess,
+	client.incomingPipe <- incomingMessage{
+		what:   messageTypeNew,
+		client: client,
 	}
+
+	log.Fields{"client": client.Nickname, "lobby": lobbyName}.Debug("client joining lobby")
+}
+
+func engineHandlePart(e *Engine, client *Client, _ interface{}) {
+	client.OutgoingPipe <- clientErrorMessage{
+		Command: "part",
+		Message: "You are not in a lobby",
+	}
+
+	log.Fields{"client": client.Nickname}.Debug("client attempted to part lobby, but was not in a lobby")
+}
+
+func engineHandleReady(e *Engine, client *Client, _ interface{}) {
+	client.OutgoingPipe <- clientErrorMessage{
+		Command: "ready",
+		Message: "You are not in a lobby",
+	}
+
+	log.Fields{"client": client.Nickname}.Debug("client attempted to ready up, but was not in a lobby")
+}
+
+func engineHandleWord(e *Engine, client *Client, _ interface{}) {
+	client.OutgoingPipe <- clientErrorMessage{
+		Command: "word",
+		Message: "You are not in a lobby",
+	}
+
+	log.Fields{"client": client.Nickname}.Debug("client attempted to guess a word, but was not in a lobby")
 }

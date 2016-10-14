@@ -83,8 +83,8 @@ func (c *client) Reader() {
 			c.Part()
 		case "ready":
 			c.Ready()
-		case "guess":
-			c.Guess(message["word"])
+		case "word":
+			c.Word(message["word"])
 		}
 	}
 }
@@ -98,7 +98,7 @@ func (c *client) Writer() {
 
 	for {
 		select {
-		case response, ok := <-c.ResponsePipe:
+		case response, ok := <-c.OutgoingPipe:
 			if !ok {
 				_ = c.WriteMessage(websocket.CloseMessage, []byte("bye"))
 				return

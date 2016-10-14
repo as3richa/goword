@@ -12,6 +12,8 @@ import (
 var adjectives []string
 var animals []string
 
+type Generator map[string]struct{}
+
 func init() {
 	var err error
 
@@ -34,4 +36,18 @@ func load(path string) ([]string, error) {
 
 func Generate() string {
 	return adjectives[rand.Intn(len(adjectives))] + " " + animals[rand.Intn(len(animals))]
+}
+
+func (g Generator) Generate() string {
+	for {
+		nick := Generate()
+		if _, ok := g[nick]; !ok {
+			g[nick] = struct{}{}
+			return nick
+		}
+	}
+}
+
+func (g Generator) Free(nick string) {
+	delete(g, nick)
 }
