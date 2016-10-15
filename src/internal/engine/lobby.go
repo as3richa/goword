@@ -39,8 +39,8 @@ type lobby struct {
 
 	Clients clientSet `json:"players"`
 
-	Grid           grid.Grid    `json:"grid"`
-	MasterSolution []scoredWord `json:"masterSolution,omitempty"`
+	Grid           grid.Grid   `json:"grid"`
+	MasterSolution *gameResult `json:"masterSolution,omitempty"`
 }
 
 type clientSet map[*Client]*clientData
@@ -49,10 +49,10 @@ type clientData struct {
 	Readied        bool `json:"readied"`
 	Score          int  `json:"score"`
 	words          []string
-	PreviousResult *clientGameResult `json:"result,omitempty"`
+	PreviousResult *gameResult `json:"result,omitempty"`
 }
 
-type clientGameResult struct {
+type gameResult struct {
 	Score int          `json:"score"`
 	Words []scoredWord `json:"words"`
 }
@@ -227,10 +227,10 @@ func (l *lobby) endGame() {
 		orderedClientData = append(orderedClientData, data)
 	}
 
-	totals, scores, solution, masterScores := l.Grid.Score(wordlists)
+	totals, scores, solution, masterTotal, masterScores := l.Grid.Score(wordlists)
 	for i, clientData := range orderedClientData {
 		clientData.Score += totals[i]
-		clientData.PreviousResult = &clientGameResult{
+		clientData.PreviousResult = &gameResult{
 			Score: totals[i],
 			Words: make([]scoredWord, len(scores[i])),
 		}
@@ -243,9 +243,13 @@ func (l *lobby) endGame() {
 		}
 	}
 
-	l.MasterSolution = make([]scoredWord, len(solution))
+	l.MasterSolution = &gameResult{
+		Score: masterTotal,
+		Words: make([]scoredWord, len(solution)),
+	}
+
 	for i, word := range solution {
-		l.MasterSolution[i] = scoredWord{
+		l.MasterSolution.Words[i] = scoredWord{
 			Word:   strings.ToLower(word),
 			Points: masterScores[i],
 		}

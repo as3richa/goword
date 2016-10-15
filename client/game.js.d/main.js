@@ -53,7 +53,6 @@
       } catch(e) {
         return;
       }
-      console.log(data);
       updateInterface(data);
     });
   });

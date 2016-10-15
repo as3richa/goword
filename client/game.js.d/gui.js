@@ -439,11 +439,11 @@
         wordlistContainerElem.appendChild(document.createElement("p"));
         wordlistContainerElem.lastChild.style.fontWeight = "bold";
         wordlistContainerElem.lastChild.style.marginTop = "0";
-        wordlistContainerElem.lastChild.appendChild(document.createTextNode("Master Solution:"));
+        wordlistContainerElem.lastChild.appendChild(document.createTextNode("Master Solution (" + lobby.masterSolution.score + "):"));
         wordlistContainerElem.appendChild(document.createElement("p"));
         wordlistContainerElem.lastChild.style.marginTop = "0";
 
-        lobby.masterSolution.forEach(function(word) {
+        lobby.masterSolution.words.forEach(function(word) {
           var wordElem = document.createElement("span");
           wordElem.style.whiteSpace = "nowrap";
           wordElem.appendChild(document.createTextNode(word.word));
