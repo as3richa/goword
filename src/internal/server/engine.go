@@ -102,7 +102,7 @@ func (c *client) Writer() {
 		select {
 		case response, ok := <-c.OutgoingPipe:
 			if !ok {
-				_ = c.WriteMessage(websocket.CloseMessage, []byte("bye"))
+				_ = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
 			}
 
