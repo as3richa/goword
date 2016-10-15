@@ -296,7 +296,7 @@ func lobbyHandleNew(l *lobby, client *Client, _ interface{}) {
 	l.broadcastState(client.Nickname + " has joined " + l.Name)
 
 	if l.State != stateAwaitingPlayers && l.State != stateBetweenGames {
-		client.OutgoingPipe <- client.StateMessage("A game is already in progress; you may join the next round of the game")
+		client.OutgoingPipe <- client.StateMessage("A game is already in progress")
 	}
 
 	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client joined lobby")
