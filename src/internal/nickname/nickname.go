@@ -5,12 +5,15 @@ import (
 	"math/rand"
 	"path"
 	"strings"
+	"time"
 
 	"internal/log"
 )
 
 var adjectives []string
 var animals []string
+
+var r *rand.Rand = rand.New(rand.NewSource(time.Now().Unix()))
 
 type Generator map[string]struct{}
 
@@ -35,7 +38,7 @@ func load(path string) ([]string, error) {
 }
 
 func Generate() string {
-	return adjectives[rand.Intn(len(adjectives))] + " " + animals[rand.Intn(len(animals))]
+	return adjectives[r.Intn(len(adjectives))] + " " + animals[r.Intn(len(animals))]
 }
 
 func (g Generator) Generate() string {

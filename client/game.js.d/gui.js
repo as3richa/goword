@@ -3,7 +3,6 @@
 
   function marginBox(elem, left, top, width, height, margin) {
     var wrapper = document.createElement("div");
-    wrapper.style.boxSizing = "border-box";
     wrapper.style.position = "absolute";
     wrapper.style.left = left;
     wrapper.style.top = top;
@@ -11,7 +10,6 @@
     wrapper.style.height = height;
     wrapper.style.padding = margin;
 
-    elem.style.boxSizing = "border-box";
     elem.style.width = "100%";
     elem.style.height = "100%";
     elem.style.margin = "0";
@@ -76,7 +74,6 @@
 
   window.addEventListener("load", function() {
     containerElem = document.createElement("div");
-    containerElem.style.boxSizing = "border-box";
     containerElem.style.position = "absolute";
 
     nicknameElem = document.createElement("div");
@@ -104,6 +101,27 @@
     containerElem.appendChild(marginBox(wordlistContainerElem, "2%", "47.5%", "32%", "50%", defaultMargin));
 
     gridElem = document.createElement("canvas");
+    gridElem.addEventListener("click", function(event) {
+      if(!inputElem.disabled) {
+        var squareSize = gridElem.width / 4;
+        var squarePadding = squareSize / 20;
+        var squareRounding = squareSize / 10;
+        var glyphSize = squareSize * 0.7;
+
+        var rect = gridElem.getBoundingClientRect();
+        var x = event.clientX - rect.left;
+        var y = event.clientY - rect.top;
+
+        var xs = x % squareSize;
+        var ys = y % squareSize;
+
+        if(xs >= squarePadding && xs < squareSize - squarePadding && ys >= squarePadding && ys < squareSize - squarePadding) {
+          var i = Math.floor(y / squareSize);
+          var j = Math.floor(x / squareSize);
+          inputElem.value += grid[i][j];
+        }
+      }
+    });
     containerElem.appendChild(marginBox(gridElem, "34%", "7.5%", "64%", "80%", defaultMargin));
 
     inputContainerElem = document.createElement("div");
@@ -131,7 +149,6 @@
     inputContainerElem.appendChild(inputElem);
 
     submitButtonElem = document.createElement("button");
-    submitButtonElem.style.boxSizing = "border-box";
     submitButtonElem.innerHTML = "Submit";
     submitButtonElem.style.width = "20%";
     submitButtonElem.style.height = "100%";
@@ -169,7 +186,6 @@
     lobbyFormSubmitElem.innerHTML = "Join";
     lobbyFormSubmitElem.style.width = "30%";
     lobbyFormSubmitElem.style.height = "20%";
-    lobbyFormSubmitElem.style.fontFamily = "Roboto";
     lobbyFormElem.appendChild(lobbyFormSubmitElem);
     lobbyFormSubmitElem.addEventListener("click", function() {
       joinLobby(lobbyFormInputElem.value);
@@ -223,7 +239,7 @@
     gridContext = gridElem.getContext("2d");
 
     resizeGame();
-    renderInterface();
+    setTimeout(renderInterface, 200);
     setInterval(updateTimer, 200);
   });
 
@@ -262,17 +278,17 @@
   }
 
   function renderGrid() {
-    gridElem.width = gridElem.width;
-
     var squareSize = gridElem.width / 4;
     var squarePadding = squareSize / 20;
     var squareRounding = squareSize / 10;
     var glyphSize = squareSize * 0.7;
 
+    gridElem.width = gridElem.width;
+
     gridContext.strokeStyle = "#777";
     gridContext.lineWidth = 2;
     gridContext.fillStyle = "#000";
-    gridContext.font = glyphSize + "px sans";
+    gridContext.font = glyphSize + "px Roboto";
     gridContext.textAlign = "center";
     gridContext.textBaseline = "middle";
 
@@ -282,17 +298,19 @@
           j * squareSize + squarePadding, i * squareSize + squarePadding,
           squareSize - 2 * squarePadding, squareSize - 2 * squarePadding, squareRounding);
 
-        gridContext.font = (grid[i][j].length == 1 ? glyphSize : (0.75) * glyphSize) + "px sans";
+        gridContext.font = ((grid[i][j].length === 1) ? glyphSize : (0.75 * glyphSize)) + "px Roboto";
         gridContext.fillText(grid[i][j], (j + 0.5) * squareSize, (i + 0.5) * squareSize);
       }
     }
   }
 
   function renderInterface() {
-    nicknameElem.removeChild(nicknameElem.firstChild);
-    nicknameElem.appendChild(document.createTextNode(nickname));
+    if(nickname) {
+      nicknameElem.removeChild(nicknameElem.firstChild);
+      nicknameElem.appendChild(document.createTextNode(nickname));
+    }
 
-    if(lobby && lobby.state === "inGame" && lobby.players[nickname].playing) {
+    if(lobby && lobby.state === "inGame") {
       inputElem.disabled = false;
       submitButtonElem.disabled = false;
     } else {
@@ -301,7 +319,7 @@
       inputElem.value = "";
     }
 
-    if(lobby && lobby.state === "betweenGames") {
+    if(lobby && lobby.state === "betweenGames" && lobby.players[nickname].readied === false) {
       lobbyReadyButtonElem.disabled = false;
     } else {
       lobbyReadyButtonElem.disabled = true;
@@ -326,10 +344,7 @@
         lobbyPlayerListElem.removeChild(lobbyPlayerListElem.lastChild);
       }
 
-      var playerNames = Object.keys(lobby.players);
-      playerNames.sort();
-
-      playerNames.forEach(function(playerName) {
+      var renderPlayerName = function(playerName) {
         var player = lobby.players[playerName];
 
         lobbyPlayerListElem.appendChild(document.createElement("div"));
@@ -337,6 +352,17 @@
         lobbyPlayerListElem.lastChild.appendChild(document.createTextNode(playerName + " (" + player.score + ")"));
         if(playerName === nickname) {
           lobbyPlayerListElem.lastChild.style.fontWeight = "bold";
+        }
+      };
+
+      renderPlayerName(nickname);
+
+      var playerNames = Object.keys(lobby.players);
+      playerNames.sort();
+
+      playerNames.forEach(function(playerName) {
+        if(playerName !== nickname) {
+          renderPlayerName(playerName);
         }
       });
 
@@ -368,15 +394,13 @@
       wordlistContainerElem.lastChild.style.marginTop = "0";
       wordlistContainerElem.lastChild.appendChild(document.createTextNode(text));
     } else if(lobby) {
-      var playerNames = Object.keys(lobby.players);
-      playerNames.sort();
-      playerNames.forEach(function(playerName) {
+      var outputPlayerResult = function(playerName) {
         var player = lobby.players[playerName];
         if(player.result) {
           wordlistContainerElem.appendChild(document.createElement("p"));
           wordlistContainerElem.lastChild.style.fontWeight = "bold";
           wordlistContainerElem.lastChild.style.marginTop = "0";
-          wordlistContainerElem.lastChild.appendChild(document.createTextNode(playerName + "'s words (" + player.result.score + ")"));
+          wordlistContainerElem.lastChild.appendChild(document.createTextNode(playerName + "'s words (" + player.result.score + "):"));
           wordlistContainerElem.appendChild(document.createElement("p"));
           wordlistContainerElem.lastChild.style.marginTop = "0";
 
@@ -399,7 +423,42 @@
             wordlistContainerElem.lastChild.appendChild(wordElem);
           });
         }
+      };
+
+      outputPlayerResult(nickname);
+
+      var playerNames = Object.keys(lobby.players);
+      playerNames.sort();
+      playerNames.forEach(function(playerName) {
+        if(playerName !== nickname) {
+          outputPlayerResult(playerName);
+        }
       });
+
+      if(lobby.masterSolution) {
+        wordlistContainerElem.appendChild(document.createElement("p"));
+        wordlistContainerElem.lastChild.style.fontWeight = "bold";
+        wordlistContainerElem.lastChild.style.marginTop = "0";
+        wordlistContainerElem.lastChild.appendChild(document.createTextNode("Master Solution:"));
+        wordlistContainerElem.appendChild(document.createElement("p"));
+        wordlistContainerElem.lastChild.style.marginTop = "0";
+
+        lobby.masterSolution.forEach(function(word) {
+          var wordElem = document.createElement("span");
+          wordElem.style.whiteSpace = "nowrap";
+          wordElem.appendChild(document.createTextNode(word.word));
+          if(word.points === 0) {
+            wordElem.style.textDecoration = "line-through";
+          } else {
+            wordElem.style.fontWeight = "bold";
+            wordElem.appendChild(document.createTextNode(" (" + word.points + ")"));
+          }
+          if(wordlistContainerElem.lastChild.children.length > 0) {
+            wordlistContainerElem.lastChild.appendChild(document.createTextNode(" "));
+          }
+          wordlistContainerElem.lastChild.appendChild(wordElem);
+        });
+      }
     }
   }
 

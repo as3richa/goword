@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,13 +39,13 @@ type lobby struct {
 
 	Clients clientSet `json:"players"`
 
-	Grid grid.Grid `json:"grid"`
+	Grid           grid.Grid    `json:"grid"`
+	MasterSolution []scoredWord `json:"masterSolution,omitempty"`
 }
 
 type clientSet map[*Client]*clientData
 
 type clientData struct {
-	Playing        bool `json:"playing"`
 	Readied        bool `json:"readied"`
 	Score          int  `json:"score"`
 	words          []string
@@ -80,7 +81,6 @@ func (e *Engine) newLobby(name string) *lobby {
 		incomingPipe:       newIncomingPipe(),
 		parentIncomingPipe: e.incomingPipe,
 		Clients:            map[*Client]*clientData{},
-		Grid:               grid.Generate(nil),
 	}
 	l.clearAsyncInterrupt()
 	return &l
@@ -219,21 +219,16 @@ func (l *lobby) transitionState() {
 func (l *lobby) endGame() {
 	log.Fields{"lobby": l.Name}.Debug("game is over; scoring")
 
-	playingClientData := make([]*clientData, 0, len(l.Clients))
+	orderedClientData := make([]*clientData, 0, len(l.Clients))
 	wordlists := make([][]string, 0, len(l.Clients))
 	for _, data := range l.Clients {
-		if !data.Playing {
-			data.PreviousResult = nil
-		} else {
-			playingClientData = append(playingClientData, data)
-			wordlists = append(wordlists, data.words)
-		}
+		sort.Strings(data.words)
+		wordlists = append(wordlists, data.words)
+		orderedClientData = append(orderedClientData, data)
 	}
 
-	log.Fields{"lobby": l.Name, "count": len(playingClientData)}.Debug("playing client count")
-
-	totals, scores := l.Grid.Score(wordlists)
-	for i, clientData := range playingClientData {
+	totals, scores, solution, masterScores := l.Grid.Score(wordlists)
+	for i, clientData := range orderedClientData {
 		clientData.Score += totals[i]
 		clientData.PreviousResult = &clientGameResult{
 			Score: totals[i],
@@ -247,6 +242,14 @@ func (l *lobby) endGame() {
 			}
 		}
 	}
+
+	l.MasterSolution = make([]scoredWord, len(solution))
+	for i, word := range solution {
+		l.MasterSolution[i] = scoredWord{
+			Word:   strings.ToLower(word),
+			Points: masterScores[i],
+		}
+	}
 }
 
 func (l *lobby) transitionToAwaitingPlayers() {
@@ -254,9 +257,9 @@ func (l *lobby) transitionToAwaitingPlayers() {
 	l.clearAsyncInterrupt()
 	l.State = stateAwaitingPlayers
 	for _, data := range l.Clients {
-		data.Playing = true
 		data.Readied = false
 	}
+	l.MasterSolution = nil
 }
 
 func (l *lobby) transitionToBetweenGames() {
@@ -264,7 +267,6 @@ func (l *lobby) transitionToBetweenGames() {
 	l.resetAsyncInterrupt(betweenGameDuration)
 	l.State = stateBetweenGames
 	for _, data := range l.Clients {
-		data.Playing = true
 		data.Readied = false
 	}
 }
@@ -278,6 +280,12 @@ func (l *lobby) transitionToCountdown() {
 		data.words = data.words[:0]
 		data.PreviousResult = nil
 	}
+	l.MasterSolution = nil
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 4; j++ {
+			l.Grid[i][j] = ""
+		}
+	}
 }
 
 func (l *lobby) transitionToInGame() {
@@ -289,7 +297,6 @@ func (l *lobby) transitionToInGame() {
 
 func lobbyHandleNew(l *lobby, client *Client, _ interface{}) {
 	l.Clients[client] = &clientData{
-		Playing: true,
 		Readied: false,
 		Score:   0,
 	}
@@ -357,16 +364,6 @@ func lobbyHandleWord(l *lobby, client *Client, data interface{}) {
 		return
 	}
 
-	if !l.Clients[client].Playing {
-		client.OutgoingPipe <- clientErrorMessage{
-			Command: "word",
-			Message: "You are not playing in the current game",
-		}
-
-		log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client tried to record a word, but is not currently playing")
-		return
-	}
-
 	if !wordRegex.MatchString(word) {
 		client.OutgoingPipe <- clientErrorMessage{
 			Command: "word",
@@ -377,9 +374,11 @@ func lobbyHandleWord(l *lobby, client *Client, data interface{}) {
 		return
 	}
 
+	word = strings.ToLower(word)
+
 	l.Clients[client].words = append(l.Clients[client].words, word)
 	client.OutgoingPipe <- clientWordMessage{
-		Word: strings.ToLower(word),
+		Word: word,
 	}
 	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client recorded a word")
 }

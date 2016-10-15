@@ -18,6 +18,7 @@ var lobbyNameRegex = regexp.MustCompile("^[\\w-]+$")
 
 type Engine struct {
 	incomingPipe chan incomingMessage
+	terminator   chan struct{}
 
 	nicknameGenerator nickname.Generator
 
@@ -48,13 +49,21 @@ func (e *Engine) Run() {
 
 	for {
 		select {
+		case <-e.terminator:
+			log.Debug("engine received termination signal; halting engine and all child lobbies")
+			for _, lobby := range e.lobbies {
+				lobby.terminate()
+			}
 		case message := <-e.incomingPipe:
 			engineDispatchTable[message.what](e, message.client, message.payload)
-
 		case <-heartbeat:
 			e.garbageCollectLobbies()
 		}
 	}
+}
+
+func (e *Engine) Terminate() {
+	close(e.terminator)
 }
 
 func (e *Engine) garbageCollectLobbies() {
@@ -101,12 +110,11 @@ func engineHandleJoin(e *Engine, client *Client, data interface{}) {
 	if lobby, ok = e.lobbies[normalizedName]; !ok {
 		log.Fields{"client": client.Nickname, "lobby": lobbyName}.Info("instantiating new lobby")
 		lobby = e.newLobby(lobbyName)
-
 		e.lobbies[normalizedName] = lobby
-		e.joinedAt[normalizedName] = time.Now()
-
 		go lobby.run()
 	}
+
+	e.joinedAt[normalizedName] = time.Now()
 
 	client.incomingPipe = lobby.incomingPipe
 	client.Lobby = lobby

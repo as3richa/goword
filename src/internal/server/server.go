@@ -9,8 +9,13 @@ import (
 	"internal/log"
 )
 
-func Server(address string, engine *engine.Engine) error {
+func Server(address string) error {
 	log.Fields{"address": address}.Info("starting http server")
+
+	engine := engine.New()
+	go engine.Run()
+	defer engine.Terminate()
+
 	w := log.Writer()
 	defer w.Close()
 	s := &http.Server{

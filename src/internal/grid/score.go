@@ -4,7 +4,7 @@ import "strings"
 
 var scoreTable = [18]int{0, 0, 0, 1, 1, 2, 3, 5, 11, 18, 20, 22, 24, 26, 28, 30, 32, 34}
 
-func (g Grid) Score(lists [][]string) ([]int, [][]int) {
+func (g Grid) Score(lists [][]string) ([]int, [][]int, []string, []int) {
 	solution := g.Solve()
 	solutionSet := map[string]struct{}{}
 
@@ -18,8 +18,17 @@ func (g Grid) Score(lists [][]string) ([]int, [][]int) {
 		for _, word := range list {
 			word = strings.ToUpper(word)
 			if _, ok := solutionSet[word]; ok {
-				wordCounts[word] += 1
+				wordCounts[word]++
 			}
+		}
+	}
+
+	masterScore := make([]int, len(solution))
+	for i, word := range solution {
+		if wordCounts[word] > 0 {
+			masterScore[i] = 0
+		} else {
+			masterScore[i] = scoreTable[len(word)]
 		}
 	}
 
@@ -42,5 +51,5 @@ func (g Grid) Score(lists [][]string) ([]int, [][]int) {
 		}
 	}
 
-	return totals, scores
+	return totals, scores, solution, masterScore
 }
