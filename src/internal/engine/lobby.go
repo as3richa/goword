@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"internal/grid"
@@ -378,7 +379,7 @@ func lobbyHandleWord(l *lobby, client *Client, data interface{}) {
 
 	l.Clients[client].words = append(l.Clients[client].words, word)
 	client.OutgoingPipe <- clientWordMessage{
-		Word: word,
+		Word: strings.ToLower(word),
 	}
 	log.Fields{"lobby": l.Name, "client": client.Nickname}.Debug("client recorded a word")
 }

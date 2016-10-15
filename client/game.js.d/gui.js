@@ -376,12 +376,13 @@
           wordlistContainerElem.appendChild(document.createElement("p"));
           wordlistContainerElem.lastChild.style.fontWeight = "bold";
           wordlistContainerElem.lastChild.style.marginTop = "0";
-          wordlistContainerElem.lastChild.appendChild(document.createTextNode(playerName + "'s words"));
+          wordlistContainerElem.lastChild.appendChild(document.createTextNode(playerName + "'s words (" + player.result.score + ")"));
           wordlistContainerElem.appendChild(document.createElement("p"));
           wordlistContainerElem.lastChild.style.marginTop = "0";
 
           player.result.words.forEach(function(word) {
             var wordElem = document.createElement("span");
+            wordElem.style.whiteSpace = "nowrap";
             wordElem.appendChild(document.createTextNode(word.word));
             if(word.points === -1) {
               wordElem.style.color = "red";

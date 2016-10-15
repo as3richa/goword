@@ -2,9 +2,11 @@ package main
 
 import (
 	"flag"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"internal/engine"
 	"internal/log"
@@ -15,6 +17,8 @@ var addressFlag = flag.String("address", ":8080", "address to listen on")
 var debugFlag = flag.Bool("debug", false, "enable debug output")
 
 func main() {
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	flag.Parse()
 
 	if *debugFlag {
