@@ -61,6 +61,7 @@ func newClient(engine *engine.Engine, ws *websocket.Conn) client {
 
 func (c *client) Reader() {
 	defer log.Debug("HTTP engine reader terminating")
+	log.Debug("HTTP engine reader running")
 
 	for {
 		_, data, err := c.ReadMessage()
@@ -95,6 +96,7 @@ func (c *client) Writer() {
 	defer ticker.Stop()
 	defer c.Close()
 	defer log.Debug("HTTP engine writer terminating")
+	log.Debug("HTTP engine writer running")
 
 	for {
 		select {
