@@ -259,7 +259,6 @@ func (l *lobby) transitionToAwaitingPlayers() {
 	for _, data := range l.Clients {
 		data.Readied = false
 	}
-	l.MasterSolution = nil
 }
 
 func (l *lobby) transitionToBetweenGames() {
