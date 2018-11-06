@@ -29,6 +29,7 @@ type client struct {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  readBufferSize,
 	WriteBufferSize: writeBufferSize,
+	CheckOrigin:		 func(r *http.Request) bool { return true },
 }
 
 func engineHandler(engine *engine.Engine) func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
